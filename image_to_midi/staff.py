@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 
-from src.models import NoteBox
+from image_to_midi.models import NoteBox
 
 
 # --------------------------------------------------------------------------- #
