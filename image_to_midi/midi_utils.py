@@ -56,41 +56,41 @@ def write_midi_file(
 
 
 def create_piano_roll(events: list[MidiEvent]) -> np.ndarray:
-    """Draw a simple piano-roll image from MIDI events.
+    """Return an RGB piano-roll image for a sequence of MidiEvent models."""
+    if not events:  # nothing to draw
+        return np.ones((20, 200, 3), np.uint8) * 255
 
-    Args:
-        events: (note, start_tick, duration_tick).
+    # time & pitch bounds ---------------------------------------------------
+    end_tick = max(e.start_tick + e.duration_tick for e in events)
+    lowest = min(e.note for e in events)
+    highest = max(e.note for e in events)
 
-    Returns:
-        H×W×3 uint8 RGB numpy array.
-    """
-    end = max((s + d) for _, s, d in events) if events else 1
-    notes = [n for n, _, _ in events]
-    low, high = (min(notes), max(notes)) if notes else (0, 0)
-    span = high - low + 1
-    height = span * 10
-    width = int(end * 1.1)
+    pitch_span = highest - lowest + 1
+    height = pitch_span * 10  # 10 px per semitone
+    width = int(end_tick * 1.1)  # 10 % right-hand margin
 
-    canvas = np.ones((height, width, 3), dtype=np.uint8) * 255
+    img = np.ones((height, width, 3), np.uint8) * 255
 
-    # draw key lines
-    for i in range(span + 1):
-        y0 = i * 10
-        color = (200, 200, 200)
-        if (low + i) % 12 in [0, 2, 4, 5, 7, 9, 11]:
-            color = (150, 150, 150)
-        cv2.line(canvas, (0, y0), (width, y0), color, 1)
+    # draw horizontal key-lines (white keys darker)
+    for i in range(pitch_span + 1):
+        y = i * 10
+        key_colour = (
+            (150, 150, 150)
+            if (lowest + i) % 12 in [0, 2, 4, 5, 7, 9, 11]
+            else (200, 200, 200)
+        )
+        cv2.line(img, (0, y), (width, y), key_colour, 1)
 
-    # draw notes
-    for note, start, dur in events:
-        y0 = (note - low) * 10
-        # rainbow fill via HSV→RGB
-        hsv = np.array([[[((note % 12) / 12) * 180, 200, 200]]], np.uint8)
+    # draw each note block
+    for ev in events:
+        y0 = (ev.note - lowest) * 10
+        top, bot = height - y0 - 10, height - y0
+        left, right = ev.start_tick, ev.start_tick + ev.duration_tick
+
+        hsv = np.array([[[((ev.note % 12) / 12) * 180, 200, 200]]], np.uint8)
         fill = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)[0][0].tolist()
 
-        top = height - y0 - 10
-        bottom = height - y0
-        cv2.rectangle(canvas, (start, top), (start + dur, bottom), fill, -1)
-        cv2.rectangle(canvas, (start, top), (start + dur, bottom), (0, 0, 0), 1)
+        cv2.rectangle(img, (left, top), (right, bot), fill, -1)
+        cv2.rectangle(img, (left, top), (right, bot), (0, 0, 0), 1)
 
-    return canvas
+    return img
