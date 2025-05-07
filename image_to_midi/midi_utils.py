@@ -4,7 +4,7 @@ import numpy as np
 from mido import MidiFile, MidiTrack, Message, MetaMessage
 import cv2
 
-from src.models import MidiEvent, NoteBox
+from image_to_midi.models import MidiEvent, NoteBox
 
 
 def build_note_events(

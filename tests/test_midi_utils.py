@@ -1,5 +1,9 @@
 import numpy as np
-from src.midi_utils import build_note_events, write_midi_file, create_piano_roll
+from image_to_midi.midi_utils import (
+    build_note_events,
+    write_midi_file,
+    create_piano_roll,
+)
 
 
 def test_build_note_events():

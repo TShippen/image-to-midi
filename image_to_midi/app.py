@@ -21,9 +21,12 @@ import numpy as np
 import streamlit as st
 from PIL import Image
 
-from src.image_processing import preprocess_image, create_note_visualization
-from src.note_detection import detect_notes
-from src.staff import (
+from image_to_midi.image_processing import (
+    preprocess_image,
+    create_note_visualization,
+)
+from image_to_midi.note_detection import detect_notes
+from image_to_midi.staff import (
     detect_lines,
     average_box_height,
     adjust_box_height,
@@ -32,8 +35,12 @@ from src.staff import (
     calculate_note_variation,
     create_staff_visualization,
 )
-from src.midi_utils import build_note_events, write_midi_file, create_piano_roll
-from src.models import NoteBox
+from image_to_midi.midi_utils import (
+    build_note_events,
+    write_midi_file,
+    create_piano_roll,
+)
+from image_to_midi.models import NoteBox
 
 # -----------------------------------------------------------------------------
 # Streamlit page setup

@@ -1,5 +1,8 @@
 import numpy as np
-from src.image_processing import preprocess_image, create_note_visualization
+from image_to_midi.image_processing import (
+    preprocess_image,
+    create_note_visualization,
+)
 
 
 def test_preprocess_image():
