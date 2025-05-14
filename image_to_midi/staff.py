@@ -57,6 +57,62 @@ def vertical_quantize_notes(notes: list[NoteBox], lines: np.ndarray) -> list[Not
     return out
 
 
+def horizontal_quantize_notes(
+    notes: list[NoteBox],
+    image_width: int,
+    grid_divisions: int = 16,
+    strength: float = 1.0,
+) -> list[NoteBox]:
+    """Quantize notes horizontally to a grid.
+
+    Args:
+        notes: List of NoteBox objects
+        image_width: Width of the image in pixels
+        grid_divisions: Number of grid divisions across the image
+        strength: Quantization strength from 0.0 (none) to 1.0 (full)
+
+    Returns:
+        List of quantized NoteBox objects
+    """
+    if not notes or grid_divisions <= 0 or strength <= 0:
+        return notes
+
+    # Calculate grid positions
+    grid_size = image_width / grid_divisions
+    grid_positions = [i * grid_size for i in range(grid_divisions + 1)]
+
+    # Quantize each note's x-position and width
+    quantized_notes = []
+    for n in notes:
+        # Find closest grid position for left edge
+        left_distances = [abs(n.x - pos) for pos in grid_positions]
+        closest_left_idx = left_distances.index(min(left_distances))
+        quantized_left = grid_positions[closest_left_idx]
+
+        # Find closest grid position for right edge
+        right = n.x + n.w
+        right_distances = [abs(right - pos) for pos in grid_positions]
+        closest_right_idx = right_distances.index(min(right_distances))
+        quantized_right = grid_positions[closest_right_idx]
+
+        # Apply quantization with strength factor
+        new_x = n.x * (1 - strength) + quantized_left * strength
+        new_right = right * (1 - strength) + quantized_right * strength
+        new_w = new_right - new_x
+
+        # Create new note with quantized position and width
+        quantized_notes.append(
+            n.model_copy(
+                update={
+                    "x": int(new_x),
+                    "w": max(1, int(new_w)),  # Ensure width is at least 1
+                }
+            )
+        )
+
+    return quantized_notes
+
+
 def calculate_fit_accuracy(notes: list[NoteBox], lines: np.ndarray) -> float:
     """Percent of boxes *not* overlapping any staff line."""
     total = len(notes)
