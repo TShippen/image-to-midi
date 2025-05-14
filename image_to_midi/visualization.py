@@ -19,94 +19,83 @@ from image_to_midi.models.pipeline_models import (
 from image_to_midi.models.visualization_models import VisualizationSet
 
 
-def create_binary_visualization(binary_mask: np.ndarray) -> np.ndarray | None:
-    """Create a visualization of a binary mask.
-    
+def create_binary_visualization(binary_mask: np.ndarray | None) -> np.ndarray | None:
+    """Create an RGB view of a binary mask, or None if no mask given.
+
     Args:
-        binary_mask: Binary image as NumPy array
-        
+        binary_mask: 2D uint8 array, or None.
+
     Returns:
-        RGB visualization of the binary mask or None if input is None
+        3-channel uint8 array, or None if input was None.
     """
     if binary_mask is None:
         return None
-        
-    # Convert binary to RGB for display
     return cv2.cvtColor(binary_mask, cv2.COLOR_GRAY2RGB)
 
 
 def create_note_detection_visualizations(
-    original_image: np.ndarray,
-    binary_mask: np.ndarray,
-    boxes: Sequence
+    original_image: np.ndarray | None,
+    binary_mask: np.ndarray | None,
+    boxes: Sequence[NoteBox | tuple[int, int, int, int]],
 ) -> tuple[np.ndarray | None, np.ndarray | None]:
-    """Create visualizations of detected notes on both original and binary images.
-    
-    This function draws bounding boxes on copies of the original image and binary mask.
-    It does not duplicate detection logic, but simply visualizes the results.
-    
+    """Overlay detection boxes on both the color image and its mask.
+
     Args:
-        original_image: Original BGR image
-        binary_mask: Binary mask image
-        boxes: List of (x, y, w, h) tuples or NoteBox objects
-        
+        original_image: H×W×3 BGR array, or None.
+        binary_mask:   H×W mask, or None.
+        boxes:         List of NoteBox or (x,y,w,h) tuples.
+
     Returns:
-        Tuple of (RGB visualization, binary visualization), either may be None if inputs are invalid
+        (RGB-overlay, mask-overlay), either may be None if inputs are invalid.
     """
     if original_image is None or binary_mask is None or not boxes:
         return None, None
-    
-    # Convert binary to RGB for drawing colored rectangles
+
+    # prepare mask‐RGB
     bin_rgb = cv2.cvtColor(binary_mask, cv2.COLOR_GRAY2RGB)
-    
-    # Create copies of the images to draw on
     rgb_viz = original_image.copy()
     bin_viz = bin_rgb.copy()
-    
-    # Draw rectangles on both visualizations
+
     for box in boxes:
-        if hasattr(box, 'x'):  # It's a NoteBox
+        if hasattr(box, "x"):
             x, y, w, h = box.x, int(box.y), box.w, int(box.h)
-        else:  # It's a tuple
-            x, y, w, h = box
-            
+        else:
+            x, y, w, h = box  # assume a 4‐tuple
         cv2.rectangle(rgb_viz, (x, y), (x + w, y + h), (255, 0, 0), 2)
         cv2.rectangle(bin_viz, (x, y), (x + w, y + h), (255, 0, 0), 2)
-    
-    # Convert BGR to RGB for display
+
+    # convert BGR→RGB for display
     rgb_viz = cv2.cvtColor(rgb_viz, cv2.COLOR_BGR2RGB)
-    
     return rgb_viz, bin_viz
 
 
 def create_staff_visualization(
-    image_shape: tuple,
+    image_shape: tuple[int, int],
     notes: Sequence[NoteBox],
-    lines: np.ndarray,
-    fill_boxes: bool = True
+    lines: np.ndarray | None,
+    fill_boxes: bool = True,
 ) -> np.ndarray | None:
-    """Render a visualization of notes and staff lines.
-    
+    """Draw staff lines and (optionally filled) note boxes on a blank canvas.
+
     Args:
-        image_shape: Tuple of (height, width) for the canvas
-        notes: List of NoteBox objects to draw
-        lines: NumPy array of staff line y-positions
-        fill_boxes: Whether to fill the note boxes (True) or just draw outlines (False)
-        
+        image_shape: (height, width) in pixels.
+        notes:       Sequence of NoteBox objects.
+        lines:       1D array of Y-positions, or None.
+        fill_boxes:  If True, draw solid rectangles; else just outlines.
+
     Returns:
-        RGB visualization with notes and staff lines or None if inputs are invalid
+        H×W×3 uint8 image, or None if `notes` is empty or `lines` is None/empty.
     """
-    if not notes or lines is None or len(lines) == 0:
+    if not notes or lines is None or lines.size == 0:
         return None
-    
-    height, width = image_shape
-    canvas = np.ones((height, width, 3), np.uint8) * 255
-    
-    # Draw notes
+
+    h, w = image_shape
+    canvas = np.full((h, w, 3), 255, np.uint8)
+
+    # draw notes
     for n in notes:
-        color = (0, 0, 0)  # Black notes
-        thickness = -1 if fill_boxes else 2  # Filled or outline
-        
+        color = (0, 0, 0)
+        thickness = -1 if fill_boxes else 2
         cv2.rectangle(
             canvas,
             (int(n.x), int(n.y)),
@@ -114,186 +103,166 @@ def create_staff_visualization(
             color,
             thickness,
         )
-    
-    # Draw staff lines
+
+    # draw lines
     for ly in lines:
-        cv2.line(canvas, (0, int(ly)), (width, int(ly)), (255, 0, 0), 1)
-    
+        cv2.line(canvas, (0, int(ly)), (w, int(ly)), (255, 0, 0), 1)
+
     return canvas
 
 
 def create_piano_roll_visualization(events: Sequence[MidiEvent]) -> np.ndarray:
-    """Create piano roll visualization for MIDI events.
-    
+    """Render a piano‐roll (time vs. pitch) image for a list of events.
+
     Args:
-        events: List of MidiEvent objects
-        
+        events: List of MidiEvent (note, start_tick, duration_tick).
+
     Returns:
-        RGB visualization of the piano roll (always returns a valid image)
+        Always returns a valid H×W×3 uint8 array (white background).
     """
     if not events:
-        # Return empty canvas if no events
-        return np.ones((20, 200, 3), np.uint8) * 255
-    
-    # Calculate time and pitch bounds
+        return np.full((20, 200, 3), 255, np.uint8)
+
     end_tick = max(e.start_tick + e.duration_tick for e in events)
     lowest = min(e.note for e in events)
     highest = max(e.note for e in events)
-    
+
     pitch_span = highest - lowest + 1
-    height = pitch_span * 10  # 10 px per semitone
-    width = int(end_tick * 1.1)  # 10% right-hand margin
-    
-    # Create canvas
-    img = np.ones((height, width, 3), np.uint8) * 255
-    
-    # Draw horizontal key-lines (white keys darker)
+    height = pitch_span * 10
+    width = int(end_tick * 1.1)
+
+    img = np.full((height, width, 3), 255, np.uint8)
+
+    # horizontal key lines
     for i in range(pitch_span + 1):
         y = i * 10
-        key_color = (
-            (150, 150, 150)
-            if (lowest + i) % 12 in [0, 2, 4, 5, 7, 9, 11]
-            else (200, 200, 200)
-        )
+        is_white = (lowest + i) % 12 in [0, 2, 4, 5, 7, 9, 11]
+        key_color = (150, 150, 150) if is_white else (200, 200, 200)
         cv2.line(img, (0, y), (width, y), key_color, 1)
-    
-    # Draw each note block
+
+    # draw notes
     for ev in events:
         y0 = (ev.note - lowest) * 10
-        top, bot = height - y0 - 10, height - y0
-        left, right = ev.start_tick, ev.start_tick + ev.duration_tick
-        
-        # Get color based on note pitch (hue from note value)
+        top = height - y0 - 10
+        bot = height - y0
+        left = ev.start_tick
+        right = ev.start_tick + ev.duration_tick
+
         hsv = np.array([[[((ev.note % 12) / 12) * 180, 200, 200]]], np.uint8)
-        fill = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)[0][0].tolist()
-        
-        # Draw filled note rectangle
+        fill = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)[0, 0].tolist()
+
         cv2.rectangle(img, (left, top), (right, bot), fill, -1)
-        
-        # Draw note outline
         cv2.rectangle(img, (left, top), (right, bot), (0, 0, 0), 1)
-    
+
     return img
 
 
-# Pipeline model visualization functions
-
 def create_detection_visualizations(
-    image: np.ndarray,
-    binary_result: BinaryResult,
-    detection_result: DetectionResult
+    image: np.ndarray | None,
+    binary_result: BinaryResult | None,
+    detection_result: DetectionResult | None,
 ) -> tuple[np.ndarray | None, np.ndarray | None]:
-    """Create RGB and binary visualizations of detected notes.
-    
+    """High‐level “pipeline” wrapper around note detection visualizations.
+
     Args:
-        image: Original RGB image
-        binary_result: BinaryResult with binary mask
-        detection_result: DetectionResult with note boxes
-        
+        image:            RGB image, or None.
+        binary_result:    may have `.binary_mask`, or None.
+        detection_result: may have `.note_boxes`, or None.
+
     Returns:
-        Tuple of (RGB visualization, binary visualization), either may be None if inputs are invalid
+        (RGB overlay, mask overlay) or (None, None) on invalid inputs.
     """
-    if (image is None or binary_result is None or 
-            binary_result.binary_mask is None or 
-            detection_result is None or not detection_result.note_boxes):
+    if (
+        image is None
+        or binary_result is None
+        or binary_result.binary_mask is None
+        or detection_result is None
+        or not detection_result.note_boxes
+    ):
         return None, None
-    
-    # Convert to BGR for OpenCV processing
-    bgr_img = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-    
-    # Create visualizations using the detected note boxes
+
+    bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
     return create_note_detection_visualizations(
-        bgr_img, 
-        binary_result.binary_mask, 
-        detection_result.note_boxes
+        bgr,
+        binary_result.binary_mask,
+        detection_result.note_boxes,
     )
 
 
 def create_staff_result_visualizations(
-    image_shape: tuple,
-    staff_result: StaffResult
+    image_shape: tuple[int, int],
+    staff_result: StaffResult | None,
 ) -> tuple[np.ndarray | None, np.ndarray | None]:
-    """Create visualizations for both original and quantized staff notes.
-    
+    """High‐level wrapper for drawing original vs. quantized staff boxes.
+
     Args:
-        image_shape: Original image dimensions (height, width)
-        staff_result: StaffResult with lines and note boxes
-        
+        image_shape:  (height, width) or None.
+        staff_result: may have `.lines`, `.original_boxes`, `.quantized_boxes`, or None.
+
     Returns:
-        Tuple of (original visualization, quantized visualization), either may be None
+        (orig_viz, quant_viz) or (None, None) on invalid inputs.
     """
-    if (staff_result is None or 
-            staff_result.lines is None or staff_result.lines.size == 0):
+    if (
+        staff_result is None
+        or staff_result.lines is None
+        or staff_result.lines.size == 0
+    ):
         return None, None
-    
-    # Create original notes visualization if available
+
     orig_viz = None
     if staff_result.original_boxes:
         orig_viz = create_staff_visualization(
-            image_shape, 
-            staff_result.original_boxes, 
-            staff_result.lines
+            image_shape, staff_result.original_boxes, staff_result.lines
         )
-    
-    # Create quantized notes visualization if available
+
     quant_viz = None
     if staff_result.quantized_boxes:
         quant_viz = create_staff_visualization(
-            image_shape, 
-            staff_result.quantized_boxes, 
-            staff_result.lines
+            image_shape, staff_result.quantized_boxes, staff_result.lines
         )
-    
+
     return orig_viz, quant_viz
 
 
 def create_all_visualizations(
-    image: np.ndarray,
-    binary_result: BinaryResult,
-    detection_result: DetectionResult,
-    staff_result: StaffResult,
-    midi_result: MidiResult
+    image: np.ndarray | None,
+    binary_result: BinaryResult | None,
+    detection_result: DetectionResult | None,
+    staff_result: StaffResult | None,
+    midi_result: MidiResult | None,
 ) -> VisualizationSet:
-    """Create a complete set of visualizations for the pipeline.
-    
+    """Bundle everything into one VisualizationSet for the UI.
+
     Args:
-        image: Original RGB image
-        binary_result: Binary processing result
-        detection_result: Note detection result
-        staff_result: Staff creation result
-        midi_result: MIDI generation result
-        
+        image:            RGB image, or None.
+        binary_result:    may have `.binary_mask`, or None.
+        detection_result: may have `.note_boxes`, or None.
+        staff_result:     may have lines/boxes, or None.
+        midi_result:      may have `.events`, or None.
+
     Returns:
-        Complete VisualizationSet for UI (all fields may be None if visualization fails)
+        A VisualizationSet instance (fields inside it may be None).
     """
     if image is None:
         return VisualizationSet()
-    
-    # Get binary mask
+
     binary_mask = binary_result.binary_mask if binary_result else None
-    
-    # Create detection visualizations
-    note_vis_rgb, note_vis_bin = create_detection_visualizations(
+    note_rgb, note_bin = create_detection_visualizations(
         image, binary_result, detection_result
     )
-    
-    # Create staff visualizations
-    img_shape = image.shape[:2]
-    staff_viz, quant_viz = create_staff_result_visualizations(
-        img_shape, staff_result
+    staff_rgb, staff_quant = create_staff_result_visualizations(
+        image.shape[:2], staff_result
     )
-    
-    # Create piano roll visualization
+
     piano_roll = None
     if midi_result and midi_result.events:
         piano_roll = create_piano_roll_visualization(midi_result.events)
-    
-    # Package into visualization set
+
     return VisualizationSet(
         binary_mask=binary_mask,
-        note_detection=note_vis_rgb,
-        note_detection_binary=note_vis_bin,
-        staff_lines=staff_viz,
-        quantized_notes=quant_viz,
-        piano_roll=piano_roll
+        note_detection=note_rgb,
+        note_detection_binary=note_bin,
+        staff_lines=staff_rgb,
+        quantized_notes=staff_quant,
+        piano_roll=piano_roll,
     )
