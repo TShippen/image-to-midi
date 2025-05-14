@@ -1,5 +1,5 @@
 import numpy as np
-from image_to_midi.models.visualization_models import VisualizationSet
+from image_to_midi.models import VisualizationSet
 
 
 def test_visualizationset_defaults():

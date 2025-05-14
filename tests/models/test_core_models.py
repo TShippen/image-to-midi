@@ -1,6 +1,6 @@
 import pytest
 from pydantic import ValidationError
-from image_to_midi.models.core_models import NoteBox, MidiEvent
+from image_to_midi.models import NoteBox, MidiEvent
 
 
 def test_notebox_properties(valid_notebox):

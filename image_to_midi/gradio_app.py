@@ -10,7 +10,7 @@ import gradio as gr
 import numpy as np
 
 from image_to_midi.pipeline import process_complete_pipeline
-from image_to_midi.models.settings import (
+from image_to_midi.models import (
     ImageProcessingParams,
     NoteDetectionParams,
     StaffParams,
@@ -119,8 +119,12 @@ def create_gradio_interface():
                         "Control how the image is converted to a binary mask that identifies potential notes."
                     )
                     threshold = gr.Slider(
-                        minimum=0, maximum=255, value=93, step=1, label="Threshold",
-                        info="Controls how light/dark areas become notes. Higher values detect lighter areas."
+                        minimum=0,
+                        maximum=255,
+                        value=93,
+                        step=1,
+                        label="Threshold",
+                        info="Controls how light/dark areas become notes. Higher values detect lighter areas.",
                     )
 
                 # 2. Note Detection parameters
@@ -130,20 +134,36 @@ def create_gradio_interface():
                         "Filter shapes in the binary image to identify those that represent notes."
                     )
                     min_area = gr.Slider(
-                        0.01, 10.0, 1.0, 0.01, label="Min Area",
-                        info="Minimum area (in pixels) for a detected shape to be considered a note"
+                        0.01,
+                        10.0,
+                        1.0,
+                        0.01,
+                        label="Min Area",
+                        info="Minimum area (in pixels) for a detected shape to be considered a note",
                     )
                     max_area = gr.Slider(
-                        100, 5000, 5000, 100, label="Max Area",
-                        info="Maximum area (in pixels) for a detected shape to be considered a note"
+                        100,
+                        5000,
+                        5000,
+                        100,
+                        label="Max Area",
+                        info="Maximum area (in pixels) for a detected shape to be considered a note",
                     )
                     min_aspect = gr.Slider(
-                        0.1, 5.0, 0.1, 0.01, label="Min Aspect Ratio",
-                        info="Minimum width/height ratio for a shape to be considered a note"
+                        0.1,
+                        5.0,
+                        0.1,
+                        0.01,
+                        label="Min Aspect Ratio",
+                        info="Minimum width/height ratio for a shape to be considered a note",
                     )
                     max_aspect = gr.Slider(
-                        5.0, 50.0, 20.0, 0.5, label="Max Aspect Ratio",
-                        info="Maximum width/height ratio for a shape to be considered a note"
+                        5.0,
+                        50.0,
+                        20.0,
+                        0.5,
+                        label="Max Aspect Ratio",
+                        info="Maximum width/height ratio for a shape to be considered a note",
                     )
 
                 # 3. Staff Line parameters
@@ -156,16 +176,23 @@ def create_gradio_interface():
                         ["Original", "Average", "Adjustable"],
                         value="Original",
                         label="Line Fitting Method",
-                        info="How to adjust note heights for staff fitting"
+                        info="How to adjust note heights for staff fitting",
                     )
                     num_lines = gr.Slider(
-                        2, 50, 10, 1, label="Number of Lines",
-                        info="Number of staff lines to create (more lines = more notes)"
+                        2,
+                        50,
+                        10,
+                        1,
+                        label="Number of Lines",
+                        info="Number of staff lines to create (more lines = more notes)",
                     )
                     height_factor = gr.Slider(
-                        0.0, 1.0, 0.5, 0.01,
+                        0.0,
+                        1.0,
+                        0.5,
+                        0.01,
                         label="Height Factor (for Adjustable method)",
-                        info="Controls note height adjustment when using Adjustable method"
+                        info="Controls note height adjustment when using Adjustable method",
                     )
 
                 # 4. MIDI Generation parameters
@@ -175,12 +202,20 @@ def create_gradio_interface():
                         "Convert the staff notes to MIDI events and generate a playable file."
                     )
                     base_midi = gr.Slider(
-                        21, 108, 60, 1, label="Base MIDI Note",
-                        info="The MIDI note number for the lowest staff line"
+                        21,
+                        108,
+                        60,
+                        1,
+                        label="Base MIDI Note",
+                        info="The MIDI note number for the lowest staff line",
                     )
                     tempo_bpm = gr.Slider(
-                        30, 240, 120, 1, label="Tempo (BPM)",
-                        info="Speed of playback in beats per minute"
+                        30,
+                        240,
+                        120,
+                        1,
+                        label="Tempo (BPM)",
+                        info="Speed of playback in beats per minute",
                     )
 
                 # Metrics display

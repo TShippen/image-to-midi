@@ -10,7 +10,7 @@ from image_to_midi.staff import (
     calculate_fit_accuracy,
     calculate_note_variation,
 )
-from image_to_midi.models.core_models import NoteBox
+from image_to_midi.models import NoteBox
 
 
 def make_boxes():

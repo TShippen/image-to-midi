@@ -1,5 +1,5 @@
 import pytest
-from image_to_midi.models.core_models import NoteBox, MidiEvent
+from image_to_midi.models import NoteBox, MidiEvent
 
 
 @pytest.fixture

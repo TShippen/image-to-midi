@@ -2,8 +2,7 @@ import numpy as np
 import cv2
 import pytest
 
-from image_to_midi.models.core_models import NoteBox
-from image_to_midi.models.pipeline_models import MidiEvent
+from image_to_midi.models import NoteBox, MidiEvent
 
 
 @pytest.fixture

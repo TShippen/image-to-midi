@@ -5,13 +5,11 @@ from image_to_midi.pipeline import (
     generate_midi,
     process_complete_pipeline,
 )
-from image_to_midi.models.settings_models import (
+from image_to_midi.models import (
     ImageProcessingParams,
     NoteDetectionParams,
     StaffParams,
     MidiParams,
-)
-from image_to_midi.models.pipeline_models import (
     BinaryResult,
     DetectionResult,
     StaffResult,
