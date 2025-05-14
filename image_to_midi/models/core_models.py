@@ -1,4 +1,5 @@
-# src/models.py
+"""Core domain models for image-to-midi conversion."""
+
 from pydantic import BaseModel, Field
 
 
