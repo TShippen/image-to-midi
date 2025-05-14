@@ -40,6 +40,18 @@ for attr_name in dir(music21.scale):
 AVAILABLE_SCALES.sort(key=lambda x: x[0])
 SCALE_NAME_TO_CLASS = {name.lower(): cls for name, _, cls in AVAILABLE_SCALES}
 
+NOTE_VALUE_TO_GRID = {
+    "Whole": 4.0,
+    "Half": 2.0,
+    "Quarter": 1.0,
+    "Eighth": 0.5,
+    "Sixteenth": 0.25,
+    "Thirty-second": 0.125,
+    "Triplet Quarter": 4 / 3,
+    "Triplet Eighth": 2 / 3,
+    "Triplet Sixteenth": 1 / 3,
+}
+
 
 def get_available_scale_names() -> list[str]:
     """Get a list of available scale types for UI display.
