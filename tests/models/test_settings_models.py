@@ -1,6 +1,6 @@
 import pytest
 from pydantic import ValidationError
-from image_to_midi.models.settings_models import (
+from image_to_midi.models import (
     ImageProcessingParams,
     NoteDetectionParams,
     StaffParams,

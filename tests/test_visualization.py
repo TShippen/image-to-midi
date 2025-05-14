@@ -8,13 +8,13 @@ from image_to_midi.visualization import (
     create_staff_result_visualizations,
     create_all_visualizations,
 )
-from image_to_midi.models.pipeline_models import (
+from image_to_midi.models import (
     BinaryResult,
     DetectionResult,
     StaffResult,
+    VisualizationSet,
+    NoteBox,
 )
-from image_to_midi.models.visualization_models import VisualizationSet
-from image_to_midi.models.core_models import NoteBox
 
 
 def test_create_binary_visualization_none():

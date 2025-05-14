@@ -1,5 +1,5 @@
 import numpy as np
-from image_to_midi.models.pipeline_models import (
+from image_to_midi.models import (
     BinaryResult,
     DetectionResult,
     StaffResult,

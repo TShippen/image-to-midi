@@ -1,6 +1,6 @@
 import numpy as np
 from image_to_midi.midi_utils import build_note_events, write_midi_file
-from image_to_midi.models.core_models import NoteBox
+from image_to_midi.models import NoteBox
 
 
 def test_build_note_events_order_and_pitch():
