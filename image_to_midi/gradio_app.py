@@ -5,6 +5,13 @@ to MIDI music. It visualizes the entire pipeline from image processing to MIDI g
 allowing users to see how parameter changes affect the final output.
 """
 
+from image_to_midi.app_state import load_fixed_image, get_image_id
+from image_to_midi.ui_updates import (
+    update_binary_view,
+    update_detection_view,
+    update_staff_view,
+    update_midi_view,
+)
 import logging
 import gradio as gr
 import cv2
@@ -26,11 +33,9 @@ from image_to_midi.midi_utils import midi_to_audio
 
 logger = logging.getLogger(__name__)
 
-# Load the fixed image once at the start
-FIXED_IMAGE = cv2.imread("img/paint_splatter.png")
-# Convert from BGR to RGB for Gradio
-if FIXED_IMAGE is not None:
-    FIXED_IMAGE = cv2.cvtColor(FIXED_IMAGE, cv2.COLOR_BGR2RGB)
+# Replace the FIXED_IMAGE loading
+FIXED_IMAGE = load_fixed_image("img/paint_splatter.png")
+IMAGE_ID = get_image_id(FIXED_IMAGE) if FIXED_IMAGE is not None else None
 
 
 # Cache for binary image processing to improve performance
