@@ -1,9 +1,12 @@
 import io
 import logging
 import os
-import subprocess
+from functools import lru_cache
+
 
 import mido
+import pretty_midi
+import soundfile as sf
 import numpy as np
 from mido import MidiFile, MidiTrack, Message, MetaMessage
 
@@ -60,55 +63,22 @@ def write_midi_file(
     return buf.getvalue()
 
 
-def midi_to_audio(midi_path):
-    """Convert MIDI file to WAV for better browser playback."""
+@lru_cache(maxsize=None)  # ← cache every unique midi_path
+def midi_to_audio(midi_path: str) -> str | None:
+    """
+    Synthesize the given MIDI file to a WAV using pure Python.
+    """
     try:
-        # Create output WAV filename
-        wav_path = midi_path.replace(".mid", ".wav")
+        pm = pretty_midi.PrettyMIDI(midi_path)
+        audio_data = pm.synthesize(fs=44100)
+        peak = np.max(np.abs(audio_data))
+        if peak > 0:
+            audio_data = audio_data / peak
 
-        # Check if FluidSynth is available
-        if subprocess.call(["which", "fluidsynth"], stdout=subprocess.PIPE) == 0:
-            # Use FluidSynth for high-quality conversion
-            # You may need to adjust the soundfont path for your system
-            soundfont = "/usr/share/sounds/sf2/FluidR3_GM.sf2"
-            if not os.path.exists(soundfont):
-                # Try alternative locations
-                alternative_fonts = [
-                    "/usr/share/soundfonts/default.sf2",
-                    "/usr/share/sounds/sf2/default.sf2",
-                ]
-                for font in alternative_fonts:
-                    if os.path.exists(font):
-                        soundfont = font
-                        break
-
-            # Convert MIDI to WAV
-            subprocess.call(
-                [
-                    "fluidsynth",
-                    "-ni",
-                    soundfont,
-                    midi_path,
-                    "-F",
-                    wav_path,
-                    "-r",
-                    "44100",
-                ]
-            )
-
-            # Return the path to the WAV file if successful
-            if os.path.exists(wav_path):
-                return wav_path
-
-        # Fallback to other methods if FluidSynth fails or isn't available
-        # Here we could add other conversion methods
-
-        # If all conversion attempts fail, return None
-        logger.warning(
-            "Could not convert MIDI to audio. FluidSynth may not be installed."
-        )
-        return None
+        wav_path = os.path.splitext(midi_path)[0] + ".wav"
+        sf.write(wav_path, audio_data, 44100)
+        return wav_path
 
     except Exception as e:
-        logger.error(f"Error converting MIDI to audio: {str(e)}")
+        logger.error(f"Failed to synthesize MIDI → audio: {e}")
         return None

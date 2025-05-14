@@ -3,6 +3,7 @@
 
 import tempfile
 import cv2
+from functools import lru_cache
 
 from image_to_midi.cache import (
     cached_binary_processing,
@@ -23,6 +24,7 @@ from image_to_midi.music_transformations import NOTE_VALUE_TO_GRID
 from image_to_midi.app_state import get_image_by_id
 
 
+@lru_cache(maxsize=32)
 def update_binary_view(image_id, threshold):
     """Update binary visualization only."""
     image = get_image_by_id(image_id)
@@ -34,6 +36,7 @@ def update_binary_view(image_id, threshold):
     return image, binary_viz
 
 
+@lru_cache(maxsize=32)
 def update_detection_view(
     image_id, threshold, min_area, max_area, min_aspect, max_aspect
 ):
@@ -53,6 +56,7 @@ def update_detection_view(
     return note_rgb, note_bin, note_count
 
 
+@lru_cache(maxsize=32)
 def update_staff_view(
     image_id,
     threshold,
@@ -88,6 +92,7 @@ def update_staff_view(
     return staff_rgb, staff_quant, accuracy, variation
 
 
+@lru_cache(maxsize=16)
 def update_midi_view(
     image_id,
     threshold,

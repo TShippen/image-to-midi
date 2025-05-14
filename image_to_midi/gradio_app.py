@@ -1,487 +1,238 @@
-"""
-Image-to-MIDI conversion app with Gradio interface.
-This application provides an interactive interface for converting paint splatter images
-to MIDI music. It visualizes the entire pipeline from image processing to MIDI generation,
-allowing users to see how parameter changes affect the final output.
-"""
+# image_to_midi/gradio_app.py
 
-from image_to_midi.app_state import load_fixed_image, get_image_id
+import logging
+import gradio as gr
+
+from image_to_midi.app_state import (
+    load_fixed_image,
+    get_image_id,
+)
 from image_to_midi.ui_updates import (
     update_binary_view,
     update_detection_view,
     update_staff_view,
     update_midi_view,
 )
-import logging
-import gradio as gr
-import cv2
-import tempfile
-from functools import lru_cache
-from image_to_midi.pipeline import process_complete_pipeline
-from image_to_midi.models import (
-    ImageProcessingParams,
-    NoteDetectionParams,
-    StaffParams,
-    MidiParams,
-)
 from image_to_midi.music_transformations import (
     get_available_key_signatures,
     get_available_scale_names,
     NOTE_VALUE_TO_GRID,
 )
-from image_to_midi.midi_utils import midi_to_audio
 
 logger = logging.getLogger(__name__)
 
-# Replace the FIXED_IMAGE loading
-FIXED_IMAGE = load_fixed_image("img/paint_splatter.png")
-IMAGE_ID = get_image_id(FIXED_IMAGE) if FIXED_IMAGE is not None else None
+# 1) Load + register the default image one time
+fixed_image_array = load_fixed_image("img/paint_splatter.png")
+initial_image_id = (
+    get_image_id(fixed_image_array) if fixed_image_array is not None else None
+)
+
+# 2) Descriptions for the staff-fitting methods
+method_descriptions = {
+    "Original": "Uses original note heights as detected - maintains exact proportions.",
+    "Average": "Normalizes all notes to the same height - reduces variance.",
+    "Adjustable": "Custom scaling of note heights - balance consistency vs. original proportions.",
+}
 
 
-# Cache for binary image processing to improve performance
-@lru_cache(maxsize=32)
-def get_binary_result(threshold):
-    """Cached binary image processing to improve response time."""
-    if FIXED_IMAGE is None:
-        return None
-
-    image_params = ImageProcessingParams(threshold=threshold)
-    from image_to_midi.image_processing import preprocess_image
-
-    bgr_img = cv2.cvtColor(FIXED_IMAGE, cv2.COLOR_RGB2BGR)
-    binary_mask = preprocess_image(bgr_img, image_params.threshold)
-    return binary_mask
-
-
-def update_pipeline_ui(
-    threshold,
-    min_area,
-    max_area,
-    min_aspect,
-    max_aspect,
-    method,
-    num_lines,
-    height_factor,
-    base_midi,
-    tempo_bpm,
-    fit_to_scale,
-    root_note,
-    scale_type,
-    quantize,
-    note_value,
-):
-    """Update the entire pipeline based on all parameters."""
-    # Use the fixed image instead of an uploaded one
-    image = FIXED_IMAGE
-
-    if image is None:
-        logger.error("Could not load the fixed image at img/paint_splatter.png")
-        return [None] * 16  # Updated for additional outputs
-
-    # Improved performance by using cached binary results
-    binary_mask = get_binary_result(threshold)
-
-    # Create parameter models
-    image_params = ImageProcessingParams(threshold=threshold)
-    detection_params = NoteDetectionParams(
-        min_area=min_area,
-        max_area=max_area,
-        min_aspect_ratio=min_aspect,
-        max_aspect_ratio=max_aspect,
-    )
-    staff_params = StaffParams(
-        method=method,
-        num_lines=num_lines,
-        height_factor=height_factor,
-    )
-
-    # Convert note_value to grid_size
-    grid_size = NOTE_VALUE_TO_GRID[note_value]
-
-    # Get base note name
-    note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-    octave = (base_midi // 12) - 1
-    note_name = note_names[base_midi % 12]
-    base_note_display = f"{note_name}{octave} (MIDI: {base_midi})"
-
-    midi_params = MidiParams(
-        base_midi_note=base_midi,
-        tempo_bpm=tempo_bpm,
-        # New fields for music transformations
-        map_to_scale=fit_to_scale,
-        scale_key=root_note,
-        scale_type=scale_type.lower(),
-        quantize_rhythm=quantize,
-        grid_size=grid_size,
-        quantize_strength=1.0,
-    )
-
-    # Process the complete pipeline
-    binary_result, detection_result, staff_result, midi_result, vis_set = (
-        process_complete_pipeline(
-            image, image_params, detection_params, staff_params, midi_params
-        )
-    )
-
-    # Create files for MIDI download and audio playback
-    midi_download_path = None
-    audio_play_path = None
-
-    if midi_result.midi_bytes:
-        # Create a temporary file with .mid extension for download
-        with tempfile.NamedTemporaryFile(suffix=".mid", delete=False) as tmp:
-            tmp.write(midi_result.midi_bytes)
-            midi_download_path = tmp.name
-
-        # Try to convert MIDI to audio for better playback
-        audio_play_path = midi_to_audio(midi_download_path)
-        if audio_play_path is None:
-            # If conversion fails, use the MIDI file as fallback
-            audio_play_path = midi_download_path
-
-    # Notes detected count for display in the Note Detection section
-    note_count_display = f"{len(detection_result.note_boxes)} notes detected"
-
-    # Try to make a taller, narrower piano roll if needed
-    piano_roll = vis_set.piano_roll
-    if piano_roll is not None:
-        # Depending on how the visualization is created, we might need to resize/reshape it
-        # This assumes the piano_roll is a numpy array image
-        try:
-            # Adjust aspect ratio if needed
-            h, w = piano_roll.shape[:2]
-            # If it's too wide and not tall enough, resize it
-            if w > h * 2:  # If width is more than twice the height
-                new_h = min(h * 2, 800)  # Double height, cap at 800px
-                new_w = w * 3 // 4  # Reduce width to 75%
-                piano_roll = cv2.resize(
-                    piano_roll, (new_w, new_h), interpolation=cv2.INTER_AREA
-                )
-        except Exception as e:
-            logger.warning(f"Could not resize piano roll: {str(e)}")
-
-    # Format outputs for Gradio interface
-    return (
-        # Original image for comparison in section 1
-        image,
-        # Section 1 - Binary mask
-        vis_set.binary_mask,
-        # Section 2 - Note detection
-        vis_set.note_detection,
-        vis_set.note_detection_binary,
-        note_count_display,  # Notes count for section 2
-        # Section 3 - Staff lines
-        vis_set.staff_lines,
-        vis_set.quantized_notes,
-        f"{staff_result.fit_accuracy:.2f}%",  # Fit accuracy for section 3
-        f"{staff_result.pitch_variation:.2f}",  # Pitch variation for section 3
-        # Section 4 - MIDI output
-        piano_roll,  # Improved piano roll
-        # Output section
-        base_note_display,  # Base note for display
-        note_count_display,  # Notes count for output section
-        f"{staff_result.fit_accuracy:.2f}%",  # Fit accuracy for output section
-        audio_play_path,  # Path for audio playback
-        midi_download_path,  # MIDI file download
-        audio_play_path,  # Audio file download
-    )
-
-
-# Helper function to handle method description and conditional UI
+# 3) Helpers
 def method_changed(method_value):
-    if method_value == "Adjustable":
-        return gr.update(visible=True)
-    else:
-        return gr.update(visible=False)
+    """Show height_factor only if 'Adjustable'."""
+    return gr.update(visible=(method_value == "Adjustable"))
+
+
+def midi_note_label(x):
+    """Convert a MIDI number to e.g. 'C4 (MIDI: 60)'."""
+    names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+    note = names[x % 12] + str((x // 12) - 1)
+    return f"{note} (MIDI: {x})"
+
+
+def initialize_app(image_id):
+    """Called on load: set every view to the defaults."""
+    # 1. Binary mask
+    orig, binary = update_binary_view(image_id, 93)
+    # 2. Note detection
+    notes_rgb, notes_bin, note_count = update_detection_view(
+        image_id, 93, 1.0, 5000.0, 0.1, 20.0
+    )
+    # 3. Staff fitting
+    staff_img, quant_img, acc, var = update_staff_view(
+        image_id, 93, 1.0, 5000.0, 0.1, 20.0, "Original", 10, 0.5
+    )
+    # 4. MIDI generation
+    p_roll, base_note, audio_path, midi_path, audio_dl_path = update_midi_view(
+        image_id,
+        93,
+        1.0,
+        5000.0,
+        0.1,
+        20.0,
+        "Original",
+        10,
+        0.5,
+        60,
+        120,
+        False,
+        "C",
+        "Major",
+        False,
+        "Quarter",
+    )
+    return [
+        orig,
+        binary,
+        notes_rgb,
+        notes_bin,
+        note_count,
+        staff_img,
+        quant_img,
+        acc,
+        var,
+        p_roll,
+        base_note,
+        audio_path,
+        midi_path,
+        audio_dl_path,
+    ]
 
 
 def create_gradio_interface():
-    """Create and configure the Gradio interface for the Image-to-MIDI app."""
     with gr.Blocks(title="Image to MIDI Converter") as interface:
         gr.Markdown("# 🎵 Image to MIDI Converter")
         gr.Markdown(
-            "This app converts a paint splatter image to music! "
-            "Adjust the parameters to see how they affect the entire process."
+            "Convert a paint-splatter image to music! "
+            "Tweak parameters and watch each step update in real time."
         )
 
-        # Define method descriptions
-        method_descriptions = {
-            "Original": "Uses original note heights as detected - maintains the exact proportions of the detected shapes.",
-            "Average": "Normalizes all notes to the same height - reduces variance but may lose some intended pitch distinctions.",
-            "Adjustable": "Allows custom scaling of note heights - find a balance between original proportions and consistency.",
-        }
+        # ⚙️ This State holds our current image ID across all callbacks
+        image_state = gr.State(initial_image_id)
 
-        # Use a parallel layout with two main columns
         with gr.Row():
-            # Left column - Parameters
             with gr.Column(scale=1):
-                # Show the fixed image at a reasonable size
+                # Display the fixed image
                 gr.Image(
-                    value="img/paint_splatter.png",
+                    value=fixed_image_array,
                     label="Source Image",
                     interactive=False,
                     height=200,
                 )
 
-                # 1. Image Processing parameters with immediate visualization
+                # 1. Image Processing
                 with gr.Group():
                     gr.Markdown("### 1. Image Processing")
-                    gr.Markdown(
-                        "Control how the image is converted to a binary mask that identifies potential notes."
-                    )
-
-                    # Controls
                     threshold = gr.Slider(
-                        minimum=0,
-                        maximum=255,
+                        0,
+                        255,
                         value=93,
                         step=1,
                         label="Threshold",
-                        info="Higher values detect lighter areas as notes.",
+                        info="Higher: detect lighter spots as notes.",
                     )
-
-                    # Side-by-side comparison of original and binary
                     with gr.Row():
                         original_view = gr.Image(label="Original Image", height=200)
                         binary_output = gr.Image(label="Binary Mask", height=200)
 
-                # 2. Note Detection parameters with immediate visualization
+                # 2. Note Detection
                 with gr.Group():
                     gr.Markdown("### 2. Note Detection")
-                    gr.Markdown(
-                        "Filter shapes in the binary image to identify those that represent notes."
-                    )
-
-                    # Parameters
                     with gr.Row():
-                        with gr.Column(scale=1):
-                            min_area = gr.Slider(
-                                0.01,
-                                10.0,
-                                1.0,
-                                0.01,
-                                label="Min Area",
-                                info="Minimum area for a note (pixels)",
-                            )
-                            max_area = gr.Slider(
-                                100,
-                                5000,
-                                5000,
-                                100,
-                                label="Max Area",
-                                info="Maximum area for a note (pixels)",
-                            )
-
-                        with gr.Column(scale=1):
-                            min_aspect = gr.Slider(
-                                0.1,
-                                5.0,
-                                0.1,
-                                0.01,
-                                label="Min Aspect Ratio",
-                                info="Min width/height ratio for a note",
-                            )
-                            max_aspect = gr.Slider(
-                                5.0,
-                                50.0,
-                                20.0,
-                                0.5,
-                                label="Max Aspect Ratio",
-                                info="Max width/height ratio for a note",
-                            )
-
-                    # Note count display - make it more prominent
+                        min_area = gr.Slider(
+                            0.01, 10.0, value=1.0, step=0.01, label="Min Area"
+                        )
+                        max_area = gr.Slider(
+                            100, 5000, value=5000, step=100, label="Max Area"
+                        )
+                    with gr.Row():
+                        min_aspect = gr.Slider(
+                            0.1, 5.0, value=0.1, step=0.01, label="Min Aspect Ratio"
+                        )
+                        max_aspect = gr.Slider(
+                            5.0, 50.0, value=20.0, step=0.5, label="Max Aspect Ratio"
+                        )
                     note_count_display = gr.Textbox(
-                        label="Detected Notes",
-                        value="No notes detected yet",
-                        elem_id="note_count",
+                        label="Detected Notes", value="No notes detected yet"
                     )
-
-                    # Note detection visualizations
                     with gr.Row():
                         note_vis_rgb = gr.Image(label="Notes on Original", height=200)
                         note_vis_bin = gr.Image(label="Notes on Binary", height=200)
 
-                # 3. Staff Line parameters
+                # 3. Staff Line Fitting
                 with gr.Group():
                     gr.Markdown("### 3. Staff Line Fitting")
-                    gr.Markdown(
-                        "Create musical staff lines and align the detected notes to them."
-                    )
-
-                    # Method selection with descriptions
                     method = gr.Radio(
-                        ["Original", "Average", "Adjustable"],
+                        choices=list(method_descriptions.keys()),
                         value="Original",
                         label="Line Fitting Method",
-                        info="Select how to adjust note heights for staff fitting",
                     )
-
-                    # Method description display
                     method_description = gr.Markdown()
-
-                    # Update the description when method changes
-                    method.change(
-                        fn=lambda x: method_descriptions[x],
-                        inputs=[method],
-                        outputs=[method_description],
+                    num_lines = gr.Slider(
+                        2, 50, value=10, step=1, label="Number of Staff Lines"
                     )
-
-                    with gr.Row():
-                        with gr.Column(scale=1):
-                            num_lines = gr.Slider(
-                                2,
-                                50,
-                                10,
-                                1,
-                                label="Number of Staff Lines",
-                                info="More lines = more notes",
-                            )
-
-                            # Height factor (conditionally visible)
-                            height_factor_container = gr.Group()
-                            with height_factor_container:
-                                height_factor = gr.Slider(
-                                    0.0,
-                                    1.0,
-                                    0.5,
-                                    0.01,
-                                    label="Height Factor",
-                                    info="Controls note height adjustment (0=uniform, 1=original)",
-                                )
-
-                            # Make height factor visible only when Adjustable is selected
-                            method.change(
-                                fn=method_changed,
-                                inputs=[method],
-                                outputs=[height_factor_container],
-                            )
-
-                        # Staff metrics
-                        with gr.Column(scale=1):
-                            staff_accuracy = gr.Textbox(
-                                label="Fit Accuracy", value="Waiting for processing..."
-                            )
-                            pitch_variation = gr.Textbox(
-                                label="Pitch Variation",
-                                value="Waiting for processing...",
-                            )
-
-                    # Staff visualization
+                    height_factor_container = gr.Group(visible=False)
+                    with height_factor_container:
+                        height_factor = gr.Slider(
+                            0.0, 1.0, value=0.5, step=0.01, label="Height Factor"
+                        )
+                    staff_accuracy = gr.Textbox(
+                        label="Fit Accuracy", value="Waiting for processing..."
+                    )
+                    pitch_variation = gr.Textbox(
+                        label="Pitch Variation", value="Waiting for processing..."
+                    )
                     with gr.Row():
                         staff_viz = gr.Image(label="Staff Lines", height=200)
                         quant_viz = gr.Image(label="Quantized Notes", height=200)
 
-                # 4-5. MIDI Generation and Transformations
+                # 4. MIDI Generation & Transformations
                 with gr.Group():
                     gr.Markdown("### 4. MIDI Generation & Transformations")
-
-                    with gr.Row():
-                        # Basic MIDI parameters
-                        with gr.Column(scale=1):
-                            gr.Markdown("#### Basic MIDI Settings")
-                            base_midi = gr.Slider(
-                                21,
-                                108,
-                                60,
-                                1,
-                                label="Base MIDI Note",
-                                info="MIDI note for lowest staff line",
-                            )
-                            base_note_display = gr.Textbox(
-                                label="Base Note", value="C4 (MIDI: 60)"
-                            )
-                            tempo_bpm = gr.Slider(
-                                30,
-                                240,
-                                120,
-                                1,
-                                label="Tempo (BPM)",
-                                info="Playback speed",
-                            )
-
-                        # Musical transformations
-                        with gr.Column(scale=1):
-                            gr.Markdown("#### Musical Transformations")
-                            fit_to_scale = gr.Checkbox(
-                                label="Fit to scale",
-                                value=False,
-                                info="Snap notes into a musical scale",
-                            )
-                            with gr.Row():
-                                root_note = gr.Dropdown(
-                                    choices=get_available_key_signatures(),
-                                    label="Root note",
-                                    value="C",
-                                )
-                                scale_type = gr.Dropdown(
-                                    choices=get_available_scale_names(),
-                                    label="Scale",
-                                    value="Major",
-                                )
-
-                            quantize = gr.Checkbox(
-                                label="Quantize rhythm",
-                                value=False,
-                                info="Snap notes to a rhythmic grid",
-                            )
-                            note_value = gr.Dropdown(
-                                choices=list(NOTE_VALUE_TO_GRID.keys()),
-                                label="Grid resolution",
-                                value="Quarter",
-                            )
-
-                # Output section
-                with gr.Group():
-                    gr.Markdown("### MIDI Output & Piano Roll")
-
-                    # Piano roll visualization with adjusted aspect ratio
-                    # Make it taller and less wide
-                    piano_roll = gr.Image(
-                        label="Piano Roll Visualization",
-                        height=500,  # Much taller
-                        elem_id="piano_roll",
+                    base_midi = gr.Slider(
+                        21, 108, value=60, step=1, label="Base MIDI Note"
                     )
-
-                    # Audio playback and downloads
+                    base_note_display = gr.Textbox(
+                        label="Base Note", value=midi_note_label(60)
+                    )
+                    tempo_bpm = gr.Slider(
+                        30, 240, value=120, step=1, label="Tempo (BPM)"
+                    )
+                    fit_to_scale = gr.Checkbox(label="Fit to scale", value=False)
+                    root_note = gr.Dropdown(
+                        choices=get_available_key_signatures(),
+                        value="C",
+                        label="Root note",
+                    )
+                    scale_type = gr.Dropdown(
+                        choices=get_available_scale_names(),
+                        value="Major",
+                        label="Scale",
+                    )
+                    quantize = gr.Checkbox(label="Quantize rhythm", value=False)
+                    note_value = gr.Dropdown(
+                        choices=list(NOTE_VALUE_TO_GRID.keys()),
+                        value="Quarter",
+                        label="Grid resolution",
+                    )
+                    piano_roll = gr.Image(label="Piano Roll Visualization", height=500)
                     with gr.Row():
-                        with gr.Column(scale=2):
-                            gr.Markdown("#### Audio Playback")
-                            audio_player = gr.Audio(
-                                label="Listen to the music",
-                                type="filepath",
-                                elem_id="audio_player",
-                            )
-
-                        with gr.Column(scale=1):
-                            gr.Markdown("#### Downloads")
-                            midi_download = gr.File(
-                                label="Download MIDI File",
-                                type="filepath",
-                                elem_id="midi_download",
-                            )
-                            audio_download = gr.File(
-                                label="Download Audio File",
-                                type="filepath",
-                                elem_id="audio_download",
-                            )
-
-                    # Add a note about MIDI playback
+                        audio_player = gr.Audio(
+                            label="Listen to the music", type="filepath"
+                        )
+                        midi_download = gr.File(
+                            label="Download MIDI File", type="filepath"
+                        )
+                        audio_download = gr.File(
+                            label="Download Audio File", type="filepath"
+                        )
                     gr.Markdown(
-                        "_Note: Audio playback quality depends on your browser's capabilities. "
-                        "For best results, download the files and open them in a dedicated player._"
+                        "_Note: Audio playback quality depends on your browser. "
+                        "For best results, download and open in a dedicated player._"
                     )
 
-        # Connect all parameters to update the entire pipeline
-        input_controls = [
-            threshold,
-            min_area,
-            max_area,
-            min_aspect,
-            max_aspect,
-            method,
-            num_lines,
-            height_factor,
+        # All inputs and outputs, reused below
+        note_detection_params = [threshold, min_area, max_area, min_aspect, max_aspect]
+        staff_params = [method, num_lines, height_factor]
+        midi_params = [
             base_midi,
             tempo_bpm,
             fit_to_scale,
@@ -490,70 +241,91 @@ def create_gradio_interface():
             quantize,
             note_value,
         ]
-
         output_components = [
-            # Section 1 outputs
             original_view,
             binary_output,
-            # Section 2 outputs
             note_vis_rgb,
             note_vis_bin,
             note_count_display,
-            # Section 3 outputs
             staff_viz,
             quant_viz,
             staff_accuracy,
             pitch_variation,
-            # Section 4 and output section
             piano_roll,
             base_note_display,
-            # Additional outputs for other sections
-            note_count_display,
-            staff_accuracy,
             audio_player,
             midi_download,
             audio_download,
         ]
 
-        # Create an initial state when the app loads
+        # —— INITIALIZATION on load ——
         interface.load(
-            fn=update_pipeline_ui,
-            inputs=input_controls,
+            fn=initialize_app,
+            inputs=[image_state],
             outputs=output_components,
         )
 
-        # For performance, only update the threshold-specific components when threshold changes
+        # —— PARAMETER CALLBACKS ——
+        method.change(
+            fn=lambda x: method_descriptions[x],
+            inputs=[method],
+            outputs=[method_description],
+        )
+        method.change(
+            fn=method_changed, inputs=[method], outputs=[height_factor_container]
+        )
+        base_midi.change(
+            fn=midi_note_label, inputs=[base_midi], outputs=[base_note_display]
+        )
+
+        # 1. Binary mask only needs threshold + image
         threshold.change(
-            fn=lambda x: (FIXED_IMAGE, get_binary_result(x)),
-            inputs=[threshold],
+            fn=update_binary_view,
+            inputs=[image_state, threshold],
             outputs=[original_view, binary_output],
         )
 
-        # Connect all inputs to the update function for when parameters change
-        for control in input_controls:
-            # Skip threshold as it's handled separately for performance
-            if control != threshold:
-                control.change(
-                    fn=update_pipeline_ui,
-                    inputs=input_controls,
-                    outputs=output_components,
-                )
+        # 2. Note detection updates
+        for p in note_detection_params:
+            p.change(
+                fn=update_detection_view,
+                inputs=[image_state] + note_detection_params,
+                outputs=[note_vis_rgb, note_vis_bin, note_count_display],
+            )
 
-        # Update Base Note display when Base MIDI changes
-        base_midi.change(
-            fn=lambda x: f"{['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'][x % 12]}{(x // 12) - 1} (MIDI: {x})",
-            inputs=[base_midi],
-            outputs=[base_note_display],
-        )
+        # 3. Staff fitting updates
+        for p in note_detection_params + staff_params:
+            p.change(
+                fn=update_staff_view,
+                inputs=[image_state] + note_detection_params + staff_params,
+                outputs=[staff_viz, quant_viz, staff_accuracy, pitch_variation],
+            )
+
+        # 4. MIDI updates
+        for p in note_detection_params + staff_params + midi_params:
+            p.change(
+                fn=update_midi_view,
+                inputs=[image_state]
+                + note_detection_params
+                + staff_params
+                + midi_params,
+                outputs=[
+                    piano_roll,
+                    base_note_display,
+                    audio_player,
+                    midi_download,
+                    audio_download,
+                ],
+            )
 
     return interface
 
 
 if __name__ == "__main__":
     demo = create_gradio_interface()
-    # Enable hot reloading for development
     demo.launch(
-        share=False,  # Set to True if you want a public link
-        debug=True,  # Show more error information
-        show_error=True,  # Display Python errors in the UI
+        share=False,
+        debug=True,
+        show_error=True,
+        server_port=7860,
     )
