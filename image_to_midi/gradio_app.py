@@ -6,208 +6,19 @@ to MIDI music. It visualizes the entire pipeline from image processing to MIDI g
 allowing users to see how parameter changes affect the final output.
 """
 
-import tempfile
 import gradio as gr
-import cv2
 import numpy as np
 
-from image_to_midi.image_processing import preprocess_image, create_note_visualization
-from image_to_midi.note_detection import detect_notes
-from image_to_midi.staff import (
-    detect_lines,
-    average_box_height,
-    adjust_box_height,
-    vertical_quantize_notes,
-    calculate_fit_accuracy,
-    calculate_note_variation,
-    create_staff_visualization,
+from image_to_midi.pipeline import process_complete_pipeline
+from image_to_midi.models.settings import (
+    ImageProcessingParams,
+    NoteDetectionParams,
+    StaffParams,
+    MidiParams,
 )
-from image_to_midi.midi_utils import (
-    build_note_events,
-    write_midi_file,
-    create_piano_roll,
-)
-from image_to_midi.models import NoteBox
 
 
-def process_image(
-    image: np.ndarray, threshold_value: int
-) -> tuple[np.ndarray | None, np.ndarray | None]:
-    """Process the uploaded image to create a binary mask.
-
-    Args:
-        image: RGB image as a NumPy array.
-        threshold_value: Threshold value for binarization (0-255).
-
-    Returns:
-        tuple: (original RGB image, binary mask image)
-    """
-    if image is None:
-        return None, None
-
-    # Convert from RGB to BGR for OpenCV
-    bgr_img = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-
-    # Process image
-    binary_mask = preprocess_image(bgr_img, threshold_value)
-
-    return image, binary_mask
-
-
-def detect_note_boxes(
-    image: np.ndarray,
-    binary_mask: np.ndarray,
-    min_area: float,
-    max_area: float,
-    min_aspect: float,
-    max_aspect: float,
-) -> tuple[np.ndarray | None, np.ndarray | None, list]:
-    """Detect note-like shapes in the binary image.
-
-    Args:
-        image: Original RGB image.
-        binary_mask: Binary mask from preprocessing.
-        min_area: Minimum contour area to consider.
-        max_area: Maximum contour area to consider.
-        min_aspect: Minimum aspect ratio (width/height) to consider.
-        max_aspect: Maximum aspect ratio (width/height) to consider.
-
-    Returns:
-        tuple: (visualization on RGB, visualization on binary, list of NoteBox objects)
-    """
-    if image is None or binary_mask is None:
-        return None, None, []
-
-    # Convert back to BGR for processing
-    bgr_img = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-
-    # Detect notes
-    raw_boxes = detect_notes(binary_mask, min_area, max_area, min_aspect, max_aspect)
-
-    # Convert to NoteBox models
-    note_boxes = [NoteBox(x=x, y=float(y), w=w, h=float(h)) for x, y, w, h in raw_boxes]
-
-    # Create visualizations
-    vis_rgb, vis_bin = create_note_visualization(bgr_img, binary_mask, raw_boxes)
-
-    # Convert BGR back to RGB for display
-    vis_rgb = cv2.cvtColor(vis_rgb, cv2.COLOR_BGR2RGB)
-
-    return vis_rgb, vis_bin, note_boxes
-
-
-def fit_staff_lines(
-    image_shape: tuple[int, int],
-    note_boxes: list,
-    method: str,
-    num_lines: int,
-    height_factor: float,
-) -> tuple[np.ndarray | None, np.ndarray | None, list, np.ndarray]:
-    """Fit staff lines to detected notes and quantize notes to lines.
-
-    Args:
-        image_shape: Original image dimensions (height, width).
-        note_boxes: List of NoteBox objects.
-        method: Line fitting method ('Original', 'Average', or 'Adjustable').
-        num_lines: Number of staff lines to create.
-        height_factor: Height adjustment factor (0-1) for 'Adjustable' method.
-
-    Returns:
-        tuple: (staff visualization, quantized visualization, quantized notes, staff lines)
-    """
-    if not note_boxes or image_shape is None:
-        return None, None, [], np.array([])
-
-    # Choose working list of NoteBoxes based on method
-    if method == "Original":
-        working_boxes = note_boxes
-    elif method == "Average":
-        working_boxes = average_box_height(note_boxes)
-    else:  # Adjustable
-        working_boxes = adjust_box_height(note_boxes, height_factor)
-
-    # Create staff lines
-    lines = detect_lines(working_boxes, num_lines)
-
-    # Quantize notes to staff lines
-    quantized = vertical_quantize_notes(working_boxes, lines)
-
-    # Create visualizations
-    viz_orig = create_staff_visualization(image_shape, working_boxes, lines)
-    viz_quant = create_staff_visualization(image_shape, quantized, lines)
-
-    return viz_orig, viz_quant, quantized, lines
-
-
-def create_midi(
-    quantized_boxes: list, lines: np.ndarray, base_midi: int, tempo_bpm: int
-) -> tuple[np.ndarray | None, str, bytes | None]:
-    """Generate MIDI from quantized notes.
-
-    Args:
-        quantized_boxes: List of quantized NoteBox objects.
-        lines: Array of staff line y-positions.
-        base_midi: Base MIDI note number.
-        tempo_bpm: Tempo in beats per minute.
-
-    Returns:
-        tuple: (piano roll visualization, midi file path, midi data bytes)
-    """
-    if not quantized_boxes or lines.size == 0:
-        return None, "", None
-
-    # Build MIDI events
-    events = build_note_events(quantized_boxes, lines, base_midi)
-
-    # Create piano roll visualization
-    roll_img = create_piano_roll(events)
-
-    # Generate MIDI file
-    midi_bytes = write_midi_file(events, tempo_bpm)
-
-    # Save MIDI to a temporary file for playback
-    with tempfile.NamedTemporaryFile(suffix=".mid", delete=False) as tmp:
-        tmp.write(midi_bytes)
-        midi_path = tmp.name
-
-    return roll_img, midi_path, midi_bytes
-
-
-def calculate_metrics(note_boxes: list, lines: np.ndarray) -> tuple[float, float]:
-    """Calculate quality metrics for staff line fitting.
-
-    Args:
-        note_boxes: List of NoteBox objects.
-        lines: Array of staff line y-positions.
-
-    Returns:
-        tuple: (fit accuracy percentage, pitch variation score)
-    """
-    if not note_boxes or lines.size == 0:
-        return 0.0, 0.0
-
-    accuracy = calculate_fit_accuracy(note_boxes, lines)
-    variation = calculate_note_variation(note_boxes, lines)
-
-    return accuracy, variation
-
-
-def get_midi_note_name(midi_note: int) -> str:
-    """Convert MIDI note number to note name with octave.
-
-    Args:
-        midi_note: MIDI note number (0-127).
-
-    Returns:
-        str: Note name with octave (e.g., "C4").
-    """
-    note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-    note = note_names[midi_note % 12]
-    octave = (midi_note // 12) - 1
-    return f"{note}{octave}"
-
-
-def update_pipeline(
+def update_pipeline_ui(
     image,
     threshold,
     min_area,
@@ -222,71 +33,62 @@ def update_pipeline(
 ):
     """Update the entire pipeline based on all parameters.
 
-    This function processes an image through the complete pipeline:
-    image → binary → note detection → staff fitting → MIDI generation.
-
     Args:
-        image: Input image data.
-        threshold: Binarization threshold.
-        min_area: Minimum blob area.
-        max_area: Maximum blob area.
-        min_aspect: Minimum aspect ratio.
-        max_aspect: Maximum aspect ratio.
-        method: Staff line fitting method.
-        num_lines: Number of staff lines.
-        height_factor: Height adjustment factor.
-        base_midi: Base MIDI note.
-        tempo_bpm: Tempo in BPM.
+        image: Input image data
+        threshold: Binarization threshold
+        min_area: Minimum blob area
+        max_area: Maximum blob area
+        min_aspect: Minimum aspect ratio
+        max_aspect: Maximum aspect ratio
+        method: Staff line fitting method
+        num_lines: Number of staff lines
+        height_factor: Height adjustment factor
+        base_midi: Base MIDI note
+        tempo_bpm: Tempo in BPM
 
     Returns:
-        All outputs required by the Gradio interface.
+        All outputs required by the Gradio interface
     """
     if image is None:
         return [None] * 12  # Return empty placeholders for all outputs
 
-    # Step 1: Process image
-    _, binary_mask = process_image(image, threshold)
-
-    # Step 2: Detect notes
-    note_vis_rgb, note_vis_bin, note_boxes = detect_note_boxes(
-        image, binary_mask, min_area, max_area, min_aspect, max_aspect
+    # Create parameter models
+    image_params = ImageProcessingParams(threshold=threshold)
+    detection_params = NoteDetectionParams(
+        min_area=min_area,
+        max_area=max_area,
+        min_aspect_ratio=min_aspect,
+        max_aspect_ratio=max_aspect,
+    )
+    staff_params = StaffParams(
+        method=method,
+        num_lines=num_lines,
+        height_factor=height_factor,
+    )
+    midi_params = MidiParams(
+        base_midi_note=base_midi,
+        tempo_bpm=tempo_bpm,
     )
 
-    # Get image dimensions for staff visualization
-    img_h, img_w = image.shape[:2] if image is not None else (0, 0)
-
-    # Step 3: Fit staff lines
-    staff_viz, quant_viz, quantized_boxes, lines = fit_staff_lines(
-        (img_h, img_w), note_boxes, method, num_lines, height_factor
+    # Process the complete pipeline
+    _, detection_result, staff_result, midi_result, vis_set = process_complete_pipeline(
+        image, image_params, detection_params, staff_params, midi_params
     )
 
-    # Calculate metrics
-    accuracy, variation = calculate_metrics(note_boxes, lines)
-
-    # Step 4: Generate MIDI
-    piano_roll, midi_path, midi_bytes = create_midi(
-        quantized_boxes, lines, base_midi, tempo_bpm
-    )
-
-    # Get note name for display
-    base_note_name = get_midi_note_name(base_midi)
-
-    # Count detections
-    num_notes = len(note_boxes)
-
+    # Format outputs for Gradio interface
     return (
-        binary_mask,
-        note_vis_rgb,
-        note_vis_bin,
-        staff_viz,
-        quant_viz,
-        piano_roll,
-        f"{accuracy:.2f}%",
-        f"{variation:.2f}",
-        f"{num_notes} notes detected",
-        f"Base note: {base_note_name}",
-        midi_path if midi_path else None,
-        midi_bytes if midi_bytes else None,
+        vis_set.binary_mask,
+        vis_set.note_detection,
+        vis_set.note_detection_binary,
+        vis_set.staff_lines,
+        vis_set.quantized_notes,
+        vis_set.piano_roll,
+        f"{staff_result.fit_accuracy:.2f}%",
+        f"{staff_result.pitch_variation:.2f}",
+        f"{len(detection_result.note_boxes)} notes detected",
+        f"Base note: {midi_result.base_note_name}",
+        midi_result.midi_file_path if midi_result.midi_file_path else None,
+        midi_result.midi_bytes if midi_result.midi_bytes else None,
     )
 
 
@@ -294,7 +96,7 @@ def create_gradio_interface():
     """Create and configure the Gradio interface for the Image-to-MIDI app.
 
     Returns:
-        gr.Blocks: Configured Gradio interface.
+        gr.Blocks: Configured Gradio interface
     """
     with gr.Blocks(title="Image to MIDI Converter") as interface:
         gr.Markdown("# 🎵 Image to MIDI Converter")
@@ -311,50 +113,82 @@ def create_gradio_interface():
                 input_image = gr.Image(label="Upload Image", type="numpy")
 
                 # 1. Image Processing parameters
-                with gr.Blocks():
+                with gr.Group():
                     gr.Markdown("### 1. Image Processing")
+                    gr.Markdown(
+                        "Control how the image is converted to a binary mask that identifies potential notes."
+                    )
                     threshold = gr.Slider(
-                        minimum=0, maximum=255, value=93, step=1, label="Threshold"
+                        minimum=0, maximum=255, value=93, step=1, label="Threshold",
+                        info="Controls how light/dark areas become notes. Higher values detect lighter areas."
                     )
 
                 # 2. Note Detection parameters
-                with gr.Blocks():
+                with gr.Group():
                     gr.Markdown("### 2. Note Detection")
-                    min_area = gr.Slider(0.01, 10.0, 1.0, 0.01, label="Min Area")
-                    max_area = gr.Slider(100, 5000, 5000, 100, label="Max Area")
+                    gr.Markdown(
+                        "Filter shapes in the binary image to identify those that represent notes."
+                    )
+                    min_area = gr.Slider(
+                        0.01, 10.0, 1.0, 0.01, label="Min Area",
+                        info="Minimum area (in pixels) for a detected shape to be considered a note"
+                    )
+                    max_area = gr.Slider(
+                        100, 5000, 5000, 100, label="Max Area",
+                        info="Maximum area (in pixels) for a detected shape to be considered a note"
+                    )
                     min_aspect = gr.Slider(
-                        0.1, 5.0, 0.1, 0.01, label="Min Aspect Ratio"
+                        0.1, 5.0, 0.1, 0.01, label="Min Aspect Ratio",
+                        info="Minimum width/height ratio for a shape to be considered a note"
                     )
                     max_aspect = gr.Slider(
-                        5.0, 50.0, 20.0, 0.5, label="Max Aspect Ratio"
+                        5.0, 50.0, 20.0, 0.5, label="Max Aspect Ratio",
+                        info="Maximum width/height ratio for a shape to be considered a note"
                     )
 
                 # 3. Staff Line parameters
-                with gr.Blocks():
+                with gr.Group():
                     gr.Markdown("### 3. Staff Line Fitting")
+                    gr.Markdown(
+                        "Create musical staff lines and align the detected notes to them."
+                    )
                     method = gr.Radio(
                         ["Original", "Average", "Adjustable"],
                         value="Original",
                         label="Line Fitting Method",
+                        info="How to adjust note heights for staff fitting"
                     )
-                    num_lines = gr.Slider(2, 50, 10, 1, label="Number of Lines")
+                    num_lines = gr.Slider(
+                        2, 50, 10, 1, label="Number of Lines",
+                        info="Number of staff lines to create (more lines = more notes)"
+                    )
                     height_factor = gr.Slider(
-                        0.0,
-                        1.0,
-                        0.5,
-                        0.01,
+                        0.0, 1.0, 0.5, 0.01,
                         label="Height Factor (for Adjustable method)",
+                        info="Controls note height adjustment when using Adjustable method"
                     )
 
                 # 4. MIDI Generation parameters
-                with gr.Blocks():
+                with gr.Group():
                     gr.Markdown("### 4. MIDI Generation")
-                    base_midi = gr.Slider(21, 108, 60, 1, label="Base MIDI Note")
-                    tempo_bpm = gr.Slider(30, 240, 120, 1, label="Tempo (BPM)")
+                    gr.Markdown(
+                        "Convert the staff notes to MIDI events and generate a playable file."
+                    )
+                    base_midi = gr.Slider(
+                        21, 108, 60, 1, label="Base MIDI Note",
+                        info="The MIDI note number for the lowest staff line"
+                    )
+                    tempo_bpm = gr.Slider(
+                        30, 240, 120, 1, label="Tempo (BPM)",
+                        info="Speed of playback in beats per minute"
+                    )
 
                 # Metrics display
-                with gr.Blocks():
+                with gr.Group():
                     gr.Markdown("### Analysis Metrics")
+                    gr.Markdown(
+                        "Statistical metrics about the notes and staff line fit."
+                    )
                     with gr.Row():
                         accuracy_display = gr.Textbox(label="Fit Accuracy")
                         variation_display = gr.Textbox(label="Pitch Variation")
@@ -364,24 +198,36 @@ def create_gradio_interface():
             # Right column - Visualizations & Output
             with gr.Column(scale=1):
                 # Process visualizations in sequential order
-                with gr.Blocks():
+                with gr.Group():
                     gr.Markdown("### Stage 1: Binary Image")
+                    gr.Markdown(
+                        "The image is converted to a binary mask where potential notes are white."
+                    )
                     binary_output = gr.Image(label="Binary Mask")
 
-                with gr.Blocks():
+                with gr.Group():
                     gr.Markdown("### Stage 2: Note Detection")
+                    gr.Markdown(
+                        "Shapes in the binary image are filtered by size and aspect ratio to identify notes."
+                    )
                     with gr.Row():
                         note_vis_rgb = gr.Image(label="Notes on Original")
                         note_vis_bin = gr.Image(label="Notes on Binary")
 
-                with gr.Blocks():
+                with gr.Group():
                     gr.Markdown("### Stage 3: Staff Line Fitting")
+                    gr.Markdown(
+                        "Staff lines are created and notes are quantized to align with the lines."
+                    )
                     with gr.Row():
                         staff_viz = gr.Image(label="Staff Lines")
                         quant_viz = gr.Image(label="Quantized Notes")
 
-                with gr.Blocks():
+                with gr.Group():
                     gr.Markdown("### Stage 4: MIDI Output")
+                    gr.Markdown(
+                        "Notes are converted to MIDI events and visualized as a piano roll."
+                    )
                     piano_roll = gr.Image(label="Piano Roll")
                     midi_audio = gr.Audio(label="MIDI Playback", type="filepath")
                     midi_download = gr.File(label="Download MIDI")
@@ -419,7 +265,7 @@ def create_gradio_interface():
         # Connect all inputs to the update function
         for control in input_controls:
             control.change(
-                fn=update_pipeline, inputs=input_controls, outputs=output_components
+                fn=update_pipeline_ui, inputs=input_controls, outputs=output_components
             )
 
     return interface

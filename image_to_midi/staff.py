@@ -1,12 +1,8 @@
-import cv2
 import numpy as np
 
 from image_to_midi.models import NoteBox
 
 
-# --------------------------------------------------------------------------- #
-# Internal helpers
-# --------------------------------------------------------------------------- #
 def _rescale_height(notes: list[NoteBox], target_h: float) -> list[NoteBox]:
     """Return new NoteBox list where every box height == target_h."""
     out: list[NoteBox] = []
@@ -23,9 +19,6 @@ def _rescale_height(notes: list[NoteBox], target_h: float) -> list[NoteBox]:
     return out
 
 
-# --------------------------------------------------------------------------- #
-# Public functions
-# --------------------------------------------------------------------------- #
 def detect_lines(notes: list[NoteBox], num_lines: int) -> np.ndarray:
     """Equally spaced staff-line Y positions spanning the note centres."""
     centres = [n.cy for n in notes]
