@@ -45,7 +45,7 @@ def adjust_box_height(notes: list[NoteBox], factor: float) -> list[NoteBox]:
     return _rescale_height(notes, float(target))
 
 
-def quantize_notes(notes: list[NoteBox], lines: np.ndarray) -> list[NoteBox]:
+def vertical_quantize_notes(notes: list[NoteBox], lines: np.ndarray) -> list[NoteBox]:
     """Snap each NoteBox vertically into its nearest staff slot."""
     out: list[NoteBox] = []
     for n in notes:

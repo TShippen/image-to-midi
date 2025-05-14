@@ -30,7 +30,7 @@ from image_to_midi.staff import (
     detect_lines,
     average_box_height,
     adjust_box_height,
-    quantize_notes,
+    vertical_quantize_notes,
     calculate_fit_accuracy,
     calculate_note_variation,
     create_staff_visualization,
@@ -213,7 +213,7 @@ if uploaded_file:
                 )
 
             lines = detect_lines(working_boxes, num_lines)
-            quantised = quantize_notes(working_boxes, lines)
+            quantised = vertical_quantize_notes(working_boxes, lines)
 
             acc = calculate_fit_accuracy(working_boxes, lines)
             var = calculate_note_variation(working_boxes, lines)
