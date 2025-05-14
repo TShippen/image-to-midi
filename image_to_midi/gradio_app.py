@@ -9,7 +9,7 @@ import logging
 import gradio as gr
 import cv2
 import tempfile
-
+from functools import lru_cache
 from image_to_midi.pipeline import process_complete_pipeline
 from image_to_midi.models import (
     ImageProcessingParams,
@@ -22,6 +22,7 @@ from image_to_midi.music_transformations import (
     get_available_scale_names,
     NOTE_VALUE_TO_GRID,
 )
+from image_to_midi.midi_utils import midi_to_audio
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,21 @@ FIXED_IMAGE = cv2.imread("img/paint_splatter.png")
 # Convert from BGR to RGB for Gradio
 if FIXED_IMAGE is not None:
     FIXED_IMAGE = cv2.cvtColor(FIXED_IMAGE, cv2.COLOR_BGR2RGB)
+
+
+# Cache for binary image processing to improve performance
+@lru_cache(maxsize=32)
+def get_binary_result(threshold):
+    """Cached binary image processing to improve response time."""
+    if FIXED_IMAGE is None:
+        return None
+
+    image_params = ImageProcessingParams(threshold=threshold)
+    from image_to_midi.image_processing import preprocess_image
+
+    bgr_img = cv2.cvtColor(FIXED_IMAGE, cv2.COLOR_RGB2BGR)
+    binary_mask = preprocess_image(bgr_img, image_params.threshold)
+    return binary_mask
 
 
 def update_pipeline_ui(
@@ -55,7 +71,10 @@ def update_pipeline_ui(
 
     if image is None:
         logger.error("Could not load the fixed image at img/paint_splatter.png")
-        return [None] * 15  # Updated for additional outputs
+        return [None] * 16  # Updated for additional outputs
+
+    # Improved performance by using cached binary results
+    binary_mask = get_binary_result(threshold)
 
     # Create parameter models
     image_params = ImageProcessingParams(threshold=threshold)
@@ -99,22 +118,42 @@ def update_pipeline_ui(
         )
     )
 
-    # Create a temp file for the downloadable MIDI if it doesn't exist
+    # Create files for MIDI download and audio playback
     midi_download_path = None
-    midi_play_path = None
+    audio_play_path = None
+
     if midi_result.midi_bytes:
         # Create a temporary file with .mid extension for download
         with tempfile.NamedTemporaryFile(suffix=".mid", delete=False) as tmp:
             tmp.write(midi_result.midi_bytes)
             midi_download_path = tmp.name
 
-        # Create another temp file for playback to ensure it's accessible
-        with tempfile.NamedTemporaryFile(suffix=".mid", delete=False) as tmp:
-            tmp.write(midi_result.midi_bytes)
-            midi_play_path = tmp.name
+        # Try to convert MIDI to audio for better playback
+        audio_play_path = midi_to_audio(midi_download_path)
+        if audio_play_path is None:
+            # If conversion fails, use the MIDI file as fallback
+            audio_play_path = midi_download_path
 
     # Notes detected count for display in the Note Detection section
     note_count_display = f"{len(detection_result.note_boxes)} notes detected"
+
+    # Try to make a taller, narrower piano roll if needed
+    piano_roll = vis_set.piano_roll
+    if piano_roll is not None:
+        # Depending on how the visualization is created, we might need to resize/reshape it
+        # This assumes the piano_roll is a numpy array image
+        try:
+            # Adjust aspect ratio if needed
+            h, w = piano_roll.shape[:2]
+            # If it's too wide and not tall enough, resize it
+            if w > h * 2:  # If width is more than twice the height
+                new_h = min(h * 2, 800)  # Double height, cap at 800px
+                new_w = w * 3 // 4  # Reduce width to 75%
+                piano_roll = cv2.resize(
+                    piano_roll, (new_w, new_h), interpolation=cv2.INTER_AREA
+                )
+        except Exception as e:
+            logger.warning(f"Could not resize piano roll: {str(e)}")
 
     # Format outputs for Gradio interface
     return (
@@ -132,13 +171,14 @@ def update_pipeline_ui(
         f"{staff_result.fit_accuracy:.2f}%",  # Fit accuracy for section 3
         f"{staff_result.pitch_variation:.2f}",  # Pitch variation for section 3
         # Section 4 - MIDI output
-        vis_set.piano_roll,
+        piano_roll,  # Improved piano roll
         # Output section
         base_note_display,  # Base note for display
         note_count_display,  # Notes count for output section
         f"{staff_result.fit_accuracy:.2f}%",  # Fit accuracy for output section
-        midi_play_path,  # Use separate path for playback
-        midi_download_path,  # Use the temporary path for the download link
+        audio_play_path,  # Path for audio playback
+        midi_download_path,  # MIDI file download
+        audio_play_path,  # Audio file download
     )
 
 
@@ -245,9 +285,11 @@ def create_gradio_interface():
                                 info="Max width/height ratio for a note",
                             )
 
-                    # Note count display
+                    # Note count display - make it more prominent
                     note_count_display = gr.Textbox(
-                        label="Detected Notes", value="No notes detected yet"
+                        label="Detected Notes",
+                        value="No notes detected yet",
+                        elem_id="note_count",
                     )
 
                     # Note detection visualizations
@@ -388,28 +430,41 @@ def create_gradio_interface():
                 with gr.Group():
                     gr.Markdown("### MIDI Output & Piano Roll")
 
-                    # Piano roll visualization with increased size
-                    piano_roll = gr.Image(label="Piano Roll Visualization", height=400)
+                    # Piano roll visualization with adjusted aspect ratio
+                    # Make it taller and less wide
+                    piano_roll = gr.Image(
+                        label="Piano Roll Visualization",
+                        height=500,  # Much taller
+                        elem_id="piano_roll",
+                    )
 
-                    # MIDI playback and download
+                    # Audio playback and downloads
                     with gr.Row():
                         with gr.Column(scale=2):
-                            midi_audio = gr.Audio(
-                                label="MIDI Playback",
+                            gr.Markdown("#### Audio Playback")
+                            audio_player = gr.Audio(
+                                label="Listen to the music",
                                 type="filepath",
-                                elem_id="midi_player",
+                                elem_id="audio_player",
                             )
+
                         with gr.Column(scale=1):
+                            gr.Markdown("#### Downloads")
                             midi_download = gr.File(
-                                label="Download MIDI",
+                                label="Download MIDI File",
                                 type="filepath",
                                 elem_id="midi_download",
+                            )
+                            audio_download = gr.File(
+                                label="Download Audio File",
+                                type="filepath",
+                                elem_id="audio_download",
                             )
 
                     # Add a note about MIDI playback
                     gr.Markdown(
-                        "_Note: Some browsers may have limited MIDI playback support. "
-                        "For best results, download the MIDI file and open it in a music player._"
+                        "_Note: Audio playback quality depends on your browser's capabilities. "
+                        "For best results, download the files and open them in a dedicated player._"
                     )
 
         # Connect all parameters to update the entire pipeline
@@ -450,8 +505,9 @@ def create_gradio_interface():
             # Additional outputs for other sections
             note_count_display,
             staff_accuracy,
-            midi_audio,
+            audio_player,
             midi_download,
+            audio_download,
         ]
 
         # Create an initial state when the app loads
@@ -461,11 +517,22 @@ def create_gradio_interface():
             outputs=output_components,
         )
 
+        # For performance, only update the threshold-specific components when threshold changes
+        threshold.change(
+            fn=lambda x: (FIXED_IMAGE, get_binary_result(x)),
+            inputs=[threshold],
+            outputs=[original_view, binary_output],
+        )
+
         # Connect all inputs to the update function for when parameters change
         for control in input_controls:
-            control.change(
-                fn=update_pipeline_ui, inputs=input_controls, outputs=output_components
-            )
+            # Skip threshold as it's handled separately for performance
+            if control != threshold:
+                control.change(
+                    fn=update_pipeline_ui,
+                    inputs=input_controls,
+                    outputs=output_components,
+                )
 
         # Update Base Note display when Base MIDI changes
         base_midi.change(
