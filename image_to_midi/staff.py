@@ -89,27 +89,3 @@ def calculate_note_variation(notes: list[NoteBox], lines: np.ndarray) -> float:
 
     deviations = [float(np.std(g)) for g in groups if len(g) > 1]
     return float(np.mean(deviations)) if deviations else 0.0
-
-
-def create_staff_visualization(
-    shape: tuple[int, int], notes: list[NoteBox], lines: np.ndarray
-) -> np.ndarray:
-    """Render a blank white canvas with black boxes and red staff lines."""
-    height, width = shape
-    canvas = np.ones((height, width, 3), np.uint8) * 255
-
-    # draw notes
-    for n in notes:
-        cv2.rectangle(
-            canvas,
-            (int(n.x), int(n.y)),
-            (int(n.x + n.w), int(n.y + n.h)),
-            (0, 0, 0),
-            -1,
-        )
-
-    # draw staff lines
-    for ly in lines:
-        cv2.line(canvas, (0, int(ly)), (width, int(ly)), (255, 0, 0), 1)
-
-    return canvas

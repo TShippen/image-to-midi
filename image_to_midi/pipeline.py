@@ -9,7 +9,7 @@ import tempfile
 import logging
 import cv2
 
-from image_to_midi.image_processing import preprocess_image, create_note_visualization
+from image_to_midi.image_processing import preprocess_image
 from image_to_midi.note_detection import detect_notes as detect_note_boxes_raw
 from image_to_midi.staff import (
     detect_lines,
@@ -18,12 +18,10 @@ from image_to_midi.staff import (
     vertical_quantize_notes,
     calculate_fit_accuracy,
     calculate_note_variation,
-    create_staff_visualization,
 )
 from image_to_midi.midi_utils import (
     build_note_events,
     write_midi_file,
-    create_piano_roll,
 )
 
 from image_to_midi.models.core_models import NoteBox
@@ -33,7 +31,7 @@ from image_to_midi.models.pipeline_models import (
     StaffResult,
     MidiResult,
 )
-
+from image_to_midi.visualization import create_all_visualizations
 from image_to_midi.models.visualization_models import VisualizationSet
 
 # Set up logging
@@ -227,224 +225,6 @@ def generate_midi(staff_result, params):
         return MidiResult()
 
 
-# Visualization Functions - Each returns a specific visualization
-
-
-def create_detection_rgb_visualization(image, binary_result, detection_result):
-    """Create RGB visualization of detected notes.
-
-    Args:
-        image: Original RGB image
-        binary_result: Binary processing result
-        detection_result: Detection results with note boxes
-
-    Returns:
-        RGB visualization with boxes drawn on original image or None if error occurs
-    """
-    try:
-        if image is None:
-            logger.warning("No image provided for RGB detection visualization")
-            return None
-
-        if binary_result.binary_mask is None:
-            logger.warning("No binary mask for RGB detection visualization")
-            return None
-
-        if not detection_result.note_boxes:
-            logger.warning("No note boxes for RGB detection visualization")
-            return None
-
-        # Convert to BGR for processing
-        bgr_img = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-
-        # Get raw box tuples for visualization
-        raw_boxes = [
-            (box.x, int(box.y), box.w, int(box.h))
-            for box in detection_result.note_boxes
-        ]
-
-        # Create visualizations
-        vis_rgb, _ = create_note_visualization(
-            bgr_img, binary_result.binary_mask, raw_boxes
-        )
-
-        # Convert BGR back to RGB for display
-        return cv2.cvtColor(vis_rgb, cv2.COLOR_BGR2RGB)
-    except Exception as e:
-        logger.error(f"Error in RGB detection visualization: {str(e)}")
-        return None
-
-
-def create_detection_binary_visualization(image, binary_result, detection_result):
-    """Create binary visualization of detected notes.
-
-    Args:
-        image: Original RGB image
-        binary_result: Binary processing result
-        detection_result: Detection results with note boxes
-
-    Returns:
-        Binary visualization with boxes drawn on binary mask or None if error occurs
-    """
-    try:
-        if image is None:
-            logger.warning("No image provided for binary detection visualization")
-            return None
-
-        if binary_result.binary_mask is None:
-            logger.warning("No binary mask for binary detection visualization")
-            return None
-
-        if not detection_result.note_boxes:
-            logger.warning("No note boxes for binary detection visualization")
-            return None
-
-        # Convert to BGR for processing
-        bgr_img = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-
-        # Get raw box tuples for visualization
-        raw_boxes = [
-            (box.x, int(box.y), box.w, int(box.h))
-            for box in detection_result.note_boxes
-        ]
-
-        # Create visualizations
-        _, vis_bin = create_note_visualization(
-            bgr_img, binary_result.binary_mask, raw_boxes
-        )
-
-        return vis_bin
-    except Exception as e:
-        logger.error(f"Error in binary detection visualization: {str(e)}")
-        return None
-
-
-def create_staff_original_visualization(image_shape, staff_result):
-    """Create visualization for original staff lines and notes.
-
-    Args:
-        image_shape: Original image dimensions (height, width)
-        staff_result: Staff results with lines and notes
-
-    Returns:
-        Visualization of original notes with staff lines or None if error occurs
-    """
-    try:
-        if not staff_result.original_boxes:
-            logger.warning("No original boxes for staff visualization")
-            return None
-
-        if staff_result.lines.size == 0:
-            logger.warning("No staff lines for original staff visualization")
-            return None
-
-        # Create visualization
-        return create_staff_visualization(
-            image_shape, staff_result.original_boxes, staff_result.lines
-        )
-    except Exception as e:
-        logger.error(f"Error in original staff visualization: {str(e)}")
-        return None
-
-
-def create_staff_quantized_visualization(image_shape, staff_result):
-    """Create visualization for quantized notes on staff lines.
-
-    Args:
-        image_shape: Original image dimensions (height, width)
-        staff_result: Staff results with lines and notes
-
-    Returns:
-        Visualization of quantized notes with staff lines or None if error occurs
-    """
-    try:
-        if not staff_result.quantized_boxes:
-            logger.warning("No quantized boxes for staff visualization")
-            return None
-
-        if staff_result.lines.size == 0:
-            logger.warning("No staff lines for quantized staff visualization")
-            return None
-
-        # Create visualization
-        return create_staff_visualization(
-            image_shape, staff_result.quantized_boxes, staff_result.lines
-        )
-    except Exception as e:
-        logger.error(f"Error in quantized staff visualization: {str(e)}")
-        return None
-
-
-def create_piano_roll_visualization(midi_result):
-    """Create piano roll visualization for MIDI events.
-
-    Args:
-        midi_result: MIDI generation result with events
-
-    Returns:
-        Piano roll image as numpy array or None if error occurs
-    """
-    try:
-        if not midi_result.events:
-            logger.warning("No MIDI events for piano roll visualization")
-            return None
-
-        # Create piano roll
-        return create_piano_roll(midi_result.events)
-    except Exception as e:
-        logger.error(f"Error in piano roll visualization: {str(e)}")
-        return None
-
-
-def create_visualization_set(
-    image, binary_result, detection_result, staff_result, midi_result
-):
-    """Create a complete set of visualizations for the pipeline.
-
-    Args:
-        image: Original RGB image
-        binary_result: Binary processing result
-        detection_result: Note detection result
-        staff_result: Staff creation result
-        midi_result: MIDI generation result
-
-    Returns:
-        Complete set of visualizations for UI
-    """
-    try:
-        if image is None:
-            logger.warning("No image provided for visualization set")
-            return VisualizationSet()
-
-        # Generate all visualizations
-        note_vis_rgb = create_detection_rgb_visualization(
-            image, binary_result, detection_result
-        )
-
-        note_vis_bin = create_detection_binary_visualization(
-            image, binary_result, detection_result
-        )
-
-        img_shape = image.shape[:2]
-        staff_vis = create_staff_original_visualization(img_shape, staff_result)
-        quant_vis = create_staff_quantized_visualization(img_shape, staff_result)
-
-        piano_roll = create_piano_roll_visualization(midi_result)
-
-        # Package into visualization set
-        return VisualizationSet(
-            binary_mask=binary_result.binary_mask,
-            note_detection=note_vis_rgb,
-            note_detection_binary=note_vis_bin,
-            staff_lines=staff_vis,
-            quantized_notes=quant_vis,
-            piano_roll=piano_roll,
-        )
-    except Exception as e:
-        logger.error(f"Error in visualization set creation: {str(e)}")
-        return VisualizationSet()
-
-
 def process_complete_pipeline(
     image, image_params, detection_params, staff_params, midi_params
 ):
@@ -484,7 +264,7 @@ def process_complete_pipeline(
         midi_result = generate_midi(staff_result, midi_params)
 
         # Create visualizations as a separate step
-        vis_set = create_visualization_set(
+        vis_set = create_all_visualizations(
             image, binary_result, detection_result, staff_result, midi_result
         )
 
