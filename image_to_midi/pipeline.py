@@ -34,13 +34,8 @@ from image_to_midi.models.pipeline_models import (
 from image_to_midi.visualization import create_all_visualizations
 from image_to_midi.models.visualization_models import VisualizationSet
 
-# Set up logging
+
 logger = logging.getLogger(__name__)
-handler = logging.StreamHandler()
-formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-handler.setFormatter(formatter)
-logger.addHandler(handler)
-logger.setLevel(logging.INFO)
 
 
 # Custom exceptions
@@ -60,9 +55,6 @@ class ProcessingError(PipelineError):
     """Exception raised when processing fails."""
 
     pass
-
-
-# Core Processing Functions - Each does one thing
 
 
 def process_binary_image(image, params):
@@ -197,6 +189,28 @@ def generate_midi(staff_result, params):
         events = build_note_events(
             staff_result.quantized_boxes, staff_result.lines, params.base_midi_note
         )
+
+        # 1) Snap into scale if requested
+        if params.map_to_scale:
+            from image_to_midi.music_transformations import map_to_scale
+
+            events = map_to_scale(
+                events, scale_key=params.scale_key, scale_name=params.scale_type
+            )
+
+        # 2) Quantize rhythm if requested
+        if params.quantize_rhythm:
+            from image_to_midi.music_transformations import quantize_rhythm
+            from mido import MidiFile
+
+            # we need ticks_per_beat from a MidiFile container
+            mid = MidiFile()
+            events = quantize_rhythm(
+                events,
+                ticks_per_beat=mid.ticks_per_beat,
+                grid_size=params.grid_size,
+                strength=params.quantize_strength,
+            )
 
         # Generate MIDI file
         midi_bytes = write_midi_file(events, params.tempo_bpm)
