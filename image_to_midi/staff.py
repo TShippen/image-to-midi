@@ -1,60 +1,105 @@
 import numpy as np
-
 from image_to_midi.models import NoteBox
 
 
 def _rescale_height(notes: list[NoteBox], target_h: float) -> list[NoteBox]:
-    """Return new NoteBox list where every box height == target_h."""
-    out: list[NoteBox] = []
-    half = target_h / 2
-    for n in notes:
-        out.append(
-            n.model_copy(
-                update={
-                    "y": n.cy - half,
-                    "h": target_h,
-                }
-            )
-        )
-    return out
+    """Rescale all NoteBox heights to a fixed target and re-center vertically.
+
+    Args:
+        notes: List of NoteBox instances.
+        target_h: Desired height for each box.
+
+    Returns:
+        A new list of NoteBox objects with `h == target_h` and
+        `y` adjusted so each box remains centered at its original midpoint.
+        Returns an empty list if `notes` is empty.
+    """
+    if not notes:
+        return []
+    half = target_h / 2.0
+    return [
+        n.model_copy(update={"y": n.y + n.h / 2.0 - half, "h": target_h}) for n in notes
+    ]
 
 
 def detect_lines(notes: list[NoteBox], num_lines: int) -> np.ndarray:
-    """Equally spaced staff-line Y positions spanning the note centres."""
-    centres = [n.cy for n in notes]
-    return np.linspace(min(centres), max(centres), num_lines)
+    """Compute equally spaced staff‐line Y positions spanning the note tops.
+
+    Args:
+        notes: List of NoteBox instances.
+        num_lines: Number of staff lines to generate.
+
+    Returns:
+        A 1D numpy array of length `num_lines`, from min(y) to max(y).
+        Returns an empty array if `notes` is empty or `num_lines <= 0`.
+    """
+    if not notes or num_lines <= 0:
+        return np.array([])
+    tops = [n.y for n in notes]
+    return np.linspace(min(tops), max(tops), num_lines)
 
 
 def average_box_height(notes: list[NoteBox]) -> list[NoteBox]:
-    """Replace every box height with the global mean height."""
-    avg = float(np.mean([n.h for n in notes]))
-    return _rescale_height(notes, avg)
+    """Normalize all box heights to their global mean height.
+
+    Args:
+        notes: List of NoteBox instances.
+
+    Returns:
+        A new list of NoteBox objects with every height set to the
+        mean of the original heights. Returns an empty list if `notes` is empty.
+    """
+    if not notes:
+        return []
+    mean_h = float(np.mean([n.h for n in notes]))
+    return _rescale_height(notes, mean_h)
 
 
 def adjust_box_height(notes: list[NoteBox], factor: float) -> list[NoteBox]:
-    """Scale all heights between min and max by *factor* ∈ [0,1]."""
-    h_min, h_max = min(n.h for n in notes), max(n.h for n in notes)
-    target = h_min + (h_max - h_min) * factor
-    return _rescale_height(notes, float(target))
+    """Scale all box heights between min and max by a given factor.
+
+    Args:
+        notes: List of NoteBox instances.
+        factor: A float in [0, 1]:
+            - 0.0 → all boxes set to the minimum height
+            - 1.0 → all boxes set to the maximum height
+
+    Returns:
+        A new list of NoteBox objects with heights interpolated between
+        the original min and max by `factor`. Returns an empty list if `notes` is empty.
+    """
+    if not notes:
+        return []
+    heights = [n.h for n in notes]
+    target_h = min(heights) + (max(heights) - min(heights)) * factor
+    return _rescale_height(notes, target_h)
 
 
 def vertical_quantize_notes(notes: list[NoteBox], lines: np.ndarray) -> list[NoteBox]:
-    """Snap each NoteBox vertically into its nearest staff slot."""
-    out: list[NoteBox] = []
+    """Snap each NoteBox vertically into its nearest staff slot.
+
+    Args:
+        notes: List of NoteBox instances.
+        lines: 1D numpy array of staff‐line Y positions; must have length ≥ 2.
+
+    Returns:
+        A new list of NoteBox objects with `y` and `h` updated so that each
+        box sits between the two closest `lines`. If `notes` is empty or
+        `lines` has fewer than 2 entries, returns an empty list.
+    """
+    if not notes or lines.size < 2:
+        return []
+    result: list[NoteBox] = []
     for n in notes:
-        for i in range(len(lines) - 1):
-            if lines[i] <= n.cy < lines[i + 1]:
-                slot_h = float(lines[i + 1] - lines[i] - 1)
-                out.append(
-                    n.model_copy(
-                        update={
-                            "y": (lines[i] + lines[i + 1]) / 2 - slot_h / 2,
-                            "h": slot_h,
-                        }
-                    )
-                )
+        center = n.y + n.h / 2.0
+        for i in range(lines.size - 1):
+            low, high = lines[i], lines[i + 1]
+            if low <= center < high:
+                slot_h = float(high - low - 1)
+                new_y = (low + high) / 2.0 - slot_h / 2.0
+                result.append(n.model_copy(update={"y": new_y, "h": slot_h}))
                 break
-    return out
+    return result
 
 
 def horizontal_quantize_notes(
@@ -63,78 +108,89 @@ def horizontal_quantize_notes(
     grid_divisions: int = 16,
     strength: float = 1.0,
 ) -> list[NoteBox]:
-    """Quantize notes horizontally to a grid.
+    """Quantize NoteBox horizontal positions and widths to an equal grid.
 
     Args:
-        notes: List of NoteBox objects
-        image_width: Width of the image in pixels
-        grid_divisions: Number of grid divisions across the image
-        strength: Quantization strength from 0.0 (none) to 1.0 (full)
+        notes: List of NoteBox instances.
+        image_width: Width of the image in pixels.
+        grid_divisions: Number of equal divisions (must be > 0).
+        strength: Quantization strength [0.0 = none, 1.0 = full snap].
 
     Returns:
-        List of quantized NoteBox objects
+        A new list of NoteBox objects with `x` and `w` moved toward the
+        nearest grid lines by `strength`. If `notes` is empty,
+        or `grid_divisions <= 0`, or `strength <= 0`, returns `notes` unchanged.
     """
     if not notes or grid_divisions <= 0 or strength <= 0:
         return notes
 
-    # Calculate grid positions
-    grid_size = image_width / grid_divisions
-    grid_positions = [i * grid_size for i in range(grid_divisions + 1)]
+    positions = np.linspace(0.0, float(image_width), grid_divisions + 1)
+    result: list[NoteBox] = []
 
-    # Quantize each note's x-position and width
-    quantized_notes = []
     for n in notes:
-        # Find closest grid position for left edge
-        left_distances = [abs(n.x - pos) for pos in grid_positions]
-        closest_left_idx = left_distances.index(min(left_distances))
-        quantized_left = grid_positions[closest_left_idx]
+        left, right = float(n.x), float(n.x + n.w)
+        idx_l = int(np.argmin(np.abs(positions - left)))
+        idx_r = int(np.argmin(np.abs(positions - right)))
+        ql, qr = positions[idx_l], positions[idx_r]
 
-        # Find closest grid position for right edge
-        right = n.x + n.w
-        right_distances = [abs(right - pos) for pos in grid_positions]
-        closest_right_idx = right_distances.index(min(right_distances))
-        quantized_right = grid_positions[closest_right_idx]
+        new_left = left * (1.0 - strength) + ql * strength
+        new_right = right * (1.0 - strength) + qr * strength
+        new_w = max(1, int(new_right - new_left))
 
-        # Apply quantization with strength factor
-        new_x = n.x * (1 - strength) + quantized_left * strength
-        new_right = right * (1 - strength) + quantized_right * strength
-        new_w = new_right - new_x
+        result.append(n.model_copy(update={"x": int(new_left), "w": new_w}))
 
-        # Create new note with quantized position and width
-        quantized_notes.append(
-            n.model_copy(
-                update={
-                    "x": int(new_x),
-                    "w": max(1, int(new_w)),  # Ensure width is at least 1
-                }
-            )
-        )
-
-    return quantized_notes
+    return result
 
 
 def calculate_fit_accuracy(notes: list[NoteBox], lines: np.ndarray) -> float:
-    """Percent of boxes *not* overlapping any staff line."""
+    """Compute the percentage of boxes not overlapping any staff line.
+
+    Args:
+        notes: List of NoteBox instances.
+        lines: 1D numpy array of staff‐line Y positions.
+
+    Returns:
+        A float in [0.0, 100.0], the percentage of NoteBoxes whose
+        vertical span does not include any line. Returns 0.0 if `notes`
+        is empty. If `lines` is empty, returns 100.0.
+    """
     total = len(notes)
     if total == 0:
         return 0.0
+    if lines.size == 0:
+        return 100.0
 
     overlaps = 0
     for n in notes:
-        top, bot = n.y, n.y + n.h
-        if any(top <= ly <= bot for ly in lines):
+        top, bottom = n.y, n.y + n.h
+        if any(top <= ly <= bottom for ly in lines):
             overlaps += 1
+
     return (total - overlaps) / total * 100.0
 
 
 def calculate_note_variation(notes: list[NoteBox], lines: np.ndarray) -> float:
-    """Mean std-dev of vertical centres within each staff slot."""
-    groups: list[list[float]] = [[] for _ in range(len(lines) - 1)]
+    """Compute mean standard deviation of vertical centers within each staff slot.
+
+    Args:
+        notes: List of NoteBox instances.
+        lines: 1D numpy array of staff‐line Y positions; length ≥ 2.
+
+    Returns:
+        The mean of standard deviations of box-center `y` within each slot
+        (between consecutive lines). Returns 0.0 if there are fewer than
+        two lines or no slot has more than one note.
+    """
+    if not notes or lines.size < 2:
+        return 0.0
+
+    slots: list[list[float]] = [[] for _ in range(lines.size - 1)]
     for n in notes:
-        for i in range(len(lines) - 1):
-            if lines[i] <= n.cy < lines[i + 1]:
-                groups[i].append(n.cy)
+        center = n.y + n.h / 2.0
+        for i in range(lines.size - 1):
+            if lines[i] <= center < lines[i + 1]:
+                slots[i].append(center)
                 break
 
-    deviations = [float(np.std(g)) for g in groups if len(g) > 1]
+    deviations = [float(np.std(group)) for group in slots if len(group) > 1]
     return float(np.mean(deviations)) if deviations else 0.0
