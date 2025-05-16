@@ -2,7 +2,6 @@
 """UI update functions for Gradio."""
 
 import tempfile
-import cv2
 from functools import lru_cache
 
 from image_to_midi.cache import (
@@ -139,24 +138,12 @@ def update_midi_view(
 
     # Create piano roll visualization
     piano_roll = (
-        create_piano_roll_visualization(midi_result.events)
+        create_piano_roll_visualization(midi_result.events, width_px=1400, dpi=180)
         if midi_result.events
         else None
     )
 
-    # Enhance piano roll visualization if needed
-    if piano_roll is not None:
-        try:
-            # Adjust aspect ratio for better visibility
-            h, w = piano_roll.shape[:2]
-            if w > h * 2:  # If width is more than twice the height
-                new_h = min(h * 2, 800)  # Double height, cap at 800px
-                new_w = w * 3 // 4  # Reduce width by 25%
-                piano_roll = cv2.resize(
-                    piano_roll, (new_w, new_h), interpolation=cv2.INTER_AREA
-                )
-        except Exception as e:
-            print(f"Could not resize piano roll: {str(e)}")
+
 
     # Create files for playback and download
     midi_download_path = None

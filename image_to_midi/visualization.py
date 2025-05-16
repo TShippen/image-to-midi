@@ -111,82 +111,97 @@ def create_staff_visualization(
     return canvas
 
 
-def create_piano_roll_visualization(events: Sequence[MidiEvent]) -> np.ndarray:
-    """Render a piano‐roll (time vs. pitch) image for a list of events.
-    Args:
-        events: List of MidiEvent (note, start_tick, duration_tick).
-    Returns:
-        Always returns a valid H×W×3 uint8 array (white background).
+def create_piano_roll_visualization(
+    events,
+    *,
+    width_px: int = 1200,
+    note_h_in: float = 0.28,
+    max_h_in: float = 12.0,
+    min_h_in: float = 2.0,
+    dpi: int = 150,
+    margin_frac: float = 0.05          # white gap above & below each bar
+):
     """
+    Return a Matplotlib piano-roll figure ready for display in Gradio.
+
+    A bar now sits fully between the black guide-lines:
+
+        ─────── guide line at pitch-0.5
+          ███   bar (pitch row interior)
+        ─────── guide line at pitch+0.5
+
+    Parameters
+    ----------
+    events        : Sequence[MidiEvent]  (needs .note, .start_tick, .duration_tick)
+    width_px      : logical bitmap width; Gradio will scale the <img>.
+    note_h_in     : physical height of one pitch row when few rows are present.
+    max_h_in/min_h_in : clamp total figure height, inches.
+    dpi           : raster DPI.
+    margin_frac   : fraction of a row left clear at top & bottom of every bar.
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+    from matplotlib.colors import hsv_to_rgb
+
+    # ---------- empty case ----------
     if not events:
-        return np.full((20, 200, 3), 255, np.uint8)
+        fig, ax = plt.subplots(figsize=(width_px / dpi, min_h_in), dpi=dpi)
+        ax.text(0.5, 0.5, "No MIDI events", ha="center", va="center",
+                transform=ax.transAxes)
+        ax.axis("off")
+        return fig
 
-    # Calculate actual start and end ticks to trim white space
-    start_tick = min(e.start_tick for e in events)
-    end_tick = max(e.start_tick + e.duration_tick for e in events)
-    tick_span = max(1, end_tick - start_tick)
+    # ---------- basic extents ----------
+    lo_note  = min(e.note for e in events)
+    hi_note  = max(e.note for e in events)
+    lo_tick  = min(e.start_tick for e in events)
+    hi_tick  = max(e.start_tick + e.duration_tick for e in events)
 
-    lowest = min(e.note for e in events)
-    highest = max(e.note for e in events)
-    pitch_span = max(1, highest - lowest + 1)
+    pitch_span = hi_note - lo_note + 1          # number of rows
 
-    # Add extra padding at top and bottom
-    padding_notes = 2  # Add 2 extra note spaces at top and bottom
-    display_pitch_span = pitch_span + (padding_notes * 2)
+    # ---------- figure size ----------
+    width_in  = width_px / dpi
+    height_in = max(min_h_in, min(max_h_in, pitch_span * note_h_in))
+    fig, ax   = plt.subplots(figsize=(width_in, height_in), dpi=dpi)
 
-    # Target total height and width
-    target_height = 500  # Target total image height
-    target_width = 1000  # Target total image width
+    # ---------- axes limits ----------
+    ax.set_xlim(lo_tick, hi_tick)
+    ax.set_ylim(lo_note - 0.5, hi_note + 0.5)   # rows are centred on ints
 
-    # Calculate height per note as a ratio of available space
-    height_per_note = target_height / display_pitch_span
+    # ---------- guide lines at row boundaries (half-integers) ----------
+    for k in range(pitch_span + 1):             # one extra for top border
+        y = lo_note - 0.5 + k                   # 59.5, 60.5, …
+        ax.axhline(y, color="black", linewidth=1, zorder=0)
 
-    # Calculate the actual image dimensions
-    height = int(display_pitch_span * height_per_note)
-    width = int(target_width)
-
-    # Scale the tick span to fit the width
-    horizontal_padding = 40  # 20px padding on each side
-    tick_to_pixel_ratio = (width - horizontal_padding) / tick_span
-
-    # Create the image
-    img = np.full((height, width, 3), 255, np.uint8)
-
-    # Adjust the vertical positions to account for padding
-    display_lowest = lowest - padding_notes
-    display_highest = highest + padding_notes
-
-    # horizontal key lines
-    for i in range(display_pitch_span + 1):
-        y = int(i * height_per_note)
-        note_value = display_lowest + i
-        is_white = note_value % 12 in [0, 2, 4, 5, 7, 9, 11]
-        key_color = (150, 150, 150) if is_white else (200, 200, 200)
-        cv2.line(img, (0, y), (width, y), key_color, 1)
-
-    # draw notes
+    # ---------- draw note rectangles fully inside each row ----------
+    cell_h   = 1 - 2 * margin_frac             # height of coloured bar
+    y_shift  = 0.5 - margin_frac               # distance from pitch number
+                                               #   to bar *top*
     for ev in events:
-        # Calculate note position with padding offset
-        note_idx = ev.note - display_lowest
-        y0 = int(note_idx * height_per_note)
-        # Adjust to stay within the lines
-        top = height - y0 - int(height_per_note) + 1  # +1 to stay inside the line
-        bot = height - y0 - 1  # -1 to stay inside the line
+        rgb = hsv_to_rgb(((ev.note % 12) / 12.0, 0.8, 0.85))
+        ax.add_patch(
+            patches.Rectangle(
+                (ev.start_tick, ev.note - y_shift),     # bottom-left
+                ev.duration_tick,                       # width
+                cell_h,                                 # height
+                facecolor=rgb,
+                edgecolor="black",
+                linewidth=0.8,
+                zorder=1
+            )
+        )
 
-        # Calculate x position based on scaled tick span
-        left = int(horizontal_padding // 2 + (ev.start_tick - start_tick) * tick_to_pixel_ratio)
-        right = int(horizontal_padding // 2 + (ev.start_tick + ev.duration_tick - start_tick) * tick_to_pixel_ratio)
+    # ---------- cosmetics ----------
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    ax.set_facecolor("white")
+    fig.tight_layout()
 
-        # Ensure minimum note width of 2px
-        if right - left < 2:
-            right = left + 2
+    return fig
 
-        hsv = np.array([[[((ev.note % 12) / 12) * 180, 200, 200]]], np.uint8)
-        fill = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)[0, 0].tolist()
-        cv2.rectangle(img, (left, top), (right, bot), fill, -1)
-        cv2.rectangle(img, (left, top), (right, bot), (0, 0, 0), 1)
 
-    return img
 
 def create_detection_visualizations(
     image: np.ndarray | None,
@@ -287,7 +302,7 @@ def create_all_visualizations(
 
     piano_roll = None
     if midi_result and midi_result.events:
-        piano_roll = create_piano_roll_visualization(midi_result.events)
+        piano_roll = create_piano_roll_visualization(midi_result.events, width_px=1400, dpi=180)
 
     return VisualizationSet(
         binary_mask=binary_mask,
