@@ -113,49 +113,80 @@ def create_staff_visualization(
 
 def create_piano_roll_visualization(events: Sequence[MidiEvent]) -> np.ndarray:
     """Render a piano‐roll (time vs. pitch) image for a list of events.
-
     Args:
         events: List of MidiEvent (note, start_tick, duration_tick).
-
     Returns:
         Always returns a valid H×W×3 uint8 array (white background).
     """
     if not events:
         return np.full((20, 200, 3), 255, np.uint8)
 
+    # Calculate actual start and end ticks to trim white space
+    start_tick = min(e.start_tick for e in events)
     end_tick = max(e.start_tick + e.duration_tick for e in events)
+    tick_span = max(1, end_tick - start_tick)
+
     lowest = min(e.note for e in events)
     highest = max(e.note for e in events)
+    pitch_span = max(1, highest - lowest + 1)
 
-    pitch_span = highest - lowest + 1
-    height = pitch_span * 10
-    width = int(end_tick * 1.1)
+    # Add extra padding at top and bottom
+    padding_notes = 2  # Add 2 extra note spaces at top and bottom
+    display_pitch_span = pitch_span + (padding_notes * 2)
 
+    # Target total height and width
+    target_height = 500  # Target total image height
+    target_width = 1000  # Target total image width
+
+    # Calculate height per note as a ratio of available space
+    height_per_note = target_height / display_pitch_span
+
+    # Calculate the actual image dimensions
+    height = int(display_pitch_span * height_per_note)
+    width = int(target_width)
+
+    # Scale the tick span to fit the width
+    horizontal_padding = 40  # 20px padding on each side
+    tick_to_pixel_ratio = (width - horizontal_padding) / tick_span
+
+    # Create the image
     img = np.full((height, width, 3), 255, np.uint8)
 
+    # Adjust the vertical positions to account for padding
+    display_lowest = lowest - padding_notes
+    display_highest = highest + padding_notes
+
     # horizontal key lines
-    for i in range(pitch_span + 1):
-        y = i * 10
-        is_white = (lowest + i) % 12 in [0, 2, 4, 5, 7, 9, 11]
+    for i in range(display_pitch_span + 1):
+        y = int(i * height_per_note)
+        note_value = display_lowest + i
+        is_white = note_value % 12 in [0, 2, 4, 5, 7, 9, 11]
         key_color = (150, 150, 150) if is_white else (200, 200, 200)
         cv2.line(img, (0, y), (width, y), key_color, 1)
 
     # draw notes
     for ev in events:
-        y0 = (ev.note - lowest) * 10
-        top = height - y0 - 10
-        bot = height - y0
-        left = ev.start_tick
-        right = ev.start_tick + ev.duration_tick
+        # Calculate note position with padding offset
+        note_idx = ev.note - display_lowest
+        y0 = int(note_idx * height_per_note)
+        # Adjust to stay within the lines
+        top = height - y0 - int(height_per_note) + 1  # +1 to stay inside the line
+        bot = height - y0 - 1  # -1 to stay inside the line
+
+        # Calculate x position based on scaled tick span
+        left = int(horizontal_padding // 2 + (ev.start_tick - start_tick) * tick_to_pixel_ratio)
+        right = int(horizontal_padding // 2 + (ev.start_tick + ev.duration_tick - start_tick) * tick_to_pixel_ratio)
+
+        # Ensure minimum note width of 2px
+        if right - left < 2:
+            right = left + 2
 
         hsv = np.array([[[((ev.note % 12) / 12) * 180, 200, 200]]], np.uint8)
         fill = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)[0, 0].tolist()
-
         cv2.rectangle(img, (left, top), (right, bot), fill, -1)
         cv2.rectangle(img, (left, top), (right, bot), (0, 0, 0), 1)
 
     return img
-
 
 def create_detection_visualizations(
     image: np.ndarray | None,
