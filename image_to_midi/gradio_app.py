@@ -260,7 +260,10 @@ def create_gradio_interface():
                         label="Grid Resolution",
                         info="Rhythmic resolution for quantization.",
                     )
-                    piano_roll = gr.Image(label="Piano Roll Visualization", height=500)
+                    piano_roll = gr.Plot(
+                        label="Piano Roll Visualization",
+                        elem_id="piano-roll-plot"
+                        )
                     with gr.Row():
                         audio_player = gr.Audio(
                             label="Listen to the Music",
