@@ -9,7 +9,7 @@ import tempfile
 import logging
 import cv2
 
-from image_to_midi.image_processing import preprocess_image
+from image_to_midi.image_processing import mask_image
 from image_to_midi.note_detection import detect_notes as detect_note_boxes_raw
 from image_to_midi.staff import (
     detect_lines,
@@ -76,7 +76,7 @@ def process_binary_image(image, params):
         bgr_img = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
 
         # Process image
-        binary_mask = preprocess_image(bgr_img, params.threshold)
+        binary_mask = mask_image(bgr_img, params.threshold)
 
         return BinaryResult(binary_mask=binary_mask)
     except Exception as e:

@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 
 
-def preprocess_image(image: np.ndarray, threshold_value: int) -> np.ndarray:
+def mask_image(image: np.ndarray, threshold_value: int) -> np.ndarray:
     """Convert a BGR image to a binary (inverted) mask.
 
     Args:
