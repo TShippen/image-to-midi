@@ -59,8 +59,8 @@ def midi_events_to_multitrack(
     # 4) Build a single StandardTrack
     track = pypianoroll.StandardTrack(
         name="Generated Track",
-        program=0,     # Acoustic Grand Piano
-        is_drum=False, # pitched notes
+        program=0,  # Acoustic Grand Piano
+        is_drum=False,  # pitched notes
         pianoroll=pianoroll,
     )
 
@@ -75,79 +75,60 @@ def midi_events_to_multitrack(
     )
 
 
-def create_piano_roll_from_events(
+def create_piano_roll_simple(
     events: Sequence[MidiEvent],
-    *,
-    width_px: int = 1200,
-    note_h_in: float = 0.28,
-    max_h_in: float = 12.0,
-    min_h_in: float = 2.0,
-    dpi: int = 150,
 ) -> Figure:
     """
-    Given a list of MidiEvent, return a matplotlib Figure of the piano roll.
+    A minimal piano-roll helper that calls pypianoroll.plot() with improved
+    scaling to show only the active pitch range.
 
     Args:
         events: Sequence of MidiEvent (with .note, .start_tick, .duration_tick).
-        width_px: Logical bitmap width (in pixels). In inches: width_px / dpi.
-        note_h_in: Height (in inches) per semitone row.
-        max_h_in: Maximum figure height, inches.
-        min_h_in: Minimum figure height, inches.
-        dpi: Raster DPI for the figure.
 
     Returns:
-        A matplotlib Figure, ready for embedding (e.g. in Gradio).
+        A matplotlib Figure containing one piano roll.
     """
     import matplotlib.pyplot as plt
 
-    # ---------- Empty‐case placeholder ----------
+    # If no events, display a “no data” placeholder
     if not events:
-        fig, ax = plt.subplots(figsize=(width_px / dpi, min_h_in), dpi=dpi)
+        fig, ax = plt.subplots()
         ax.text(
-            0.5,
-            0.5,
-            "No MIDI events",
-            ha="center",
-            va="center",
-            transform=ax.transAxes,
+            0.5, 0.5, "No MIDI events", ha="center", va="center", transform=ax.transAxes
         )
         ax.axis("off")
         return fig
 
-    try:
-        # Convert to Multitrack
-        multitrack = midi_events_to_multitrack(events)
+    # 1) Convert events → Multitrack
+    multitrack = midi_events_to_multitrack(events)
 
-        # Compute pitch span from events
-        lo_note = min(e.note for e in events)
-        hi_note = max(e.note for e in events)
-        pitch_span = hi_note - lo_note + 1
+    # 2) Create a Matplotlib Figure and one Axes per track
+    n_tracks = len(multitrack.tracks)
+    fig, axs = plt.subplots(n_tracks, 1)
 
-        width_in = width_px / dpi
-        height_in = max(min_h_in, min(max_h_in, pitch_span * note_h_in))
+    # If there is only one track, axs is a single Axes (not a list), so wrap it
+    if n_tracks == 1:
+        axs = [axs]
 
-        # Let pypianoroll create its own subplots with our size/dpi
-        for _ax in multitrack.plot(ax=None, figsize=(width_in, height_in), dpi=dpi):
-            pass
+    # 3) Let pypianoroll draw onto those axes with better labels
+    multitrack.plot(axs=axs, ytick='pitch', yticklabel='number')
 
-        # Grab the figure that pypianoroll created
-        fig = plt.gcf()
-        return fig
+    # 4) Scale y-axis to show only active pitch range
+    for i, track in enumerate(multitrack.tracks):
+        if track.pianoroll.size > 0:
+            # Find the range of active pitches
+            active_pitches = np.any(track.pianoroll, axis=0)
+            if np.any(active_pitches):
+                lowest = int(np.min(np.where(active_pitches)[0]))
+                highest = int(np.max(np.where(active_pitches)[0]))
 
-    except Exception as e:
-        # Fall back to a simple “error” image
-        fig, ax = plt.subplots(figsize=(width_px / dpi, min_h_in), dpi=dpi)
-        ax.text(
-            0.5,
-            0.5,
-            f"Error creating piano roll:\n{e}",
-            ha="center",
-            va="center",
-            transform=ax.transAxes,
-            wrap=True,
-        )
-        ax.axis("off")
-        return fig
+                # Add small padding around the range
+                padding = 3
+                axs[i].set_ylim(max(0, lowest - padding), min(127, highest + padding))
+
+    # 4) Optionally tighten layout, then return
+    fig.tight_layout()
+    return fig
 
 
 # -----------------------------------------------------------------------------
@@ -217,7 +198,7 @@ def boxes_to_multitrack(
     # 5) Wrap into one StandardTrack
     track = pypianoroll.StandardTrack(
         name="BoxTrack",
-        program=0,      # Acoustic Grand Piano
+        program=0,  # Acoustic Grand Piano
         is_drum=False,  # pitched notes
         pianoroll=pianoroll,
     )
@@ -231,91 +212,6 @@ def boxes_to_multitrack(
         tempo=tempo_array,
         tracks=[track],
     )
-
-
-def create_piano_roll_from_boxes(
-    boxes: Sequence[NoteBox],
-    lines: np.ndarray,
-    base_midi: int = 60,
-    *,
-    ticks_per_px: int = 4,
-    resolution: int = 480,
-    tempo: int = 120,
-    width_px: int = 1200,
-    note_h_in: float = 0.28,
-    max_h_in: float = 12.0,
-    min_h_in: float = 2.0,
-    dpi: int = 150,
-) -> Figure:
-    """
-    Generate a piano-roll Figure from quantized NoteBox objects (no MidiEvent needed).
-
-    Args:
-        boxes:       Sequence of NoteBox (quantized to staff lines).
-        lines:       1D array of Y positions for staff lines (top→bottom).
-        base_midi:   MIDI pitch for the bottom staff line (e.g. 60 = C4).
-        ticks_per_px: MIDI ticks per horizontal pixel.
-        resolution:  MIDI ticks per quarter note.
-        tempo:       Constant BPM.
-        width_px:    Logical bitmap width (in pixels).
-        note_h_in:   Height (in inches) per semitone row.
-        max_h_in:    Maximum total figure height, inches.
-        min_h_in:    Minimum total figure height, inches.
-        dpi:         Raster DPI for the figure.
-
-    Returns:
-        A matplotlib Figure of the piano roll.
-    """
-    import matplotlib.pyplot as plt
-
-    # If there are no boxes or no staff lines, show a “No notes to plot” placeholder
-    if not boxes or lines is None or lines.size == 0:
-        fig, ax = plt.subplots(figsize=(width_px / dpi, min_h_in), dpi=dpi)
-        ax.text(
-            0.5,
-            0.5,
-            "No notes to plot",
-            ha="center",
-            va="center",
-            transform=ax.transAxes,
-            fontsize=12,
-        )
-        ax.axis("off")
-        return fig
-
-    # 1) Convert boxes → Multitrack
-    multitrack = boxes_to_multitrack(
-        boxes=boxes,
-        lines=lines,
-        base_midi=base_midi,
-        ticks_per_px=ticks_per_px,
-        resolution=resolution,
-        tempo=tempo,
-    )
-
-    # 2) Compute pitch span (min/max pitch from the boxes) to size the figure
-    lo_pitch = min(
-        base_midi
-        + (lines.size - int(np.argmin(np.abs(lines - (b.y + b.h / 2.0)))) - 1)
-        for b in boxes
-    )
-    hi_pitch = max(
-        base_midi
-        + (lines.size - int(np.argmin(np.abs(lines - (b.y + b.h / 2.0)))) - 1)
-        for b in boxes
-    )
-    pitch_span = hi_pitch - lo_pitch + 1
-
-    width_in = width_px / dpi
-    height_in = max(min_h_in, min(max_h_in, pitch_span * note_h_in))
-
-    # 3) Let pypianoroll plot it (it will create its own subplots)
-    for _ax in multitrack.plot(ax=None, figsize=(width_in, height_in), dpi=dpi):
-        pass
-
-    # 4) Grab the figure that matplotlib is currently holding
-    fig = plt.gcf()
-    return fig
 
 
 # -----------------------------------------------------------------------------
@@ -517,21 +413,7 @@ def create_all_visualizations(
     # 4) Piano-roll: prefer “events” path; fallback to “boxes” path
     piano_roll = None
     if midi_result and midi_result.events:
-        piano_roll = create_piano_roll_from_events(
-            midi_result.events, width_px=1400, dpi=180
-        )
-    else:
-        if staff_result and staff_result.quantized_boxes and staff_result.lines is not None:
-            piano_roll = create_piano_roll_from_boxes(
-                boxes=staff_result.quantized_boxes,
-                lines=staff_result.lines,
-                base_midi=60,      # adjust if your base MIDI pitch differs
-                ticks_per_px=4,    # must match build_note_events's ticks_per_px
-                resolution=480,
-                tempo=120,
-                width_px=1400,
-                dpi=180,
-            )
+        piano_roll = create_piano_roll_simple(midi_result.events)
 
     return VisualizationSet(
         binary_mask=binary_mask,
