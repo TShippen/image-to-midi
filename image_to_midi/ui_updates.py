@@ -10,12 +10,15 @@ from image_to_midi.cache import (
     cached_staff_creation,
     cached_midi_generation,
 )
+
 from image_to_midi.visualization import (
     create_binary_visualization,
     create_detection_visualizations,
     create_staff_result_visualizations,
-    create_piano_roll_visualization,
+    create_piano_roll_from_events,
+    create_piano_roll_from_boxes,
 )
+
 from image_to_midi.midi_utils import midi_to_audio
 from image_to_midi.music_transformations import NOTE_VALUE_TO_GRID
 
@@ -111,11 +114,11 @@ def update_midi_view(
     note_value,
 ):
     """Update MIDI visualization and outputs."""
-    # Convert parameters
+    # 1) Convert note‐value → grid_size, quantize strength
     grid_size = NOTE_VALUE_TO_GRID[note_value]
     quantize_strength = 1.0 if quantize else 0.0
 
-    # Get cached MIDI result
+    # 2) Pull cached MidiResult
     midi_result = cached_midi_generation(
         image_id,
         threshold,
@@ -136,37 +139,63 @@ def update_midi_view(
         quantize_strength,
     )
 
-    # Create piano roll visualization
-    piano_roll = (
-        create_piano_roll_visualization(midi_result.events, width_px=1400, dpi=180)
-        if midi_result.events
-        else None
-    )
+    # 3) Build piano_roll from events if there are any
+    piano_roll = None
+    if midi_result.events:
+        piano_roll = create_piano_roll_from_events(
+            midi_result.events, width_px=1400, dpi=180
+        )
+    else:
+        # 4) Fallback: re‐fetch StaffResult so we can plot boxes→Multitrack
+        staff_result = cached_staff_creation(
+            image_id,
+            threshold,
+            min_area,
+            max_area,
+            min_aspect,
+            max_aspect,
+            method,
+            num_lines,
+            height_factor,
+        )
+        if (
+            staff_result
+            and staff_result.quantized_boxes
+            and staff_result.lines is not None
+            and staff_result.lines.size > 0
+        ):
+            piano_roll = create_piano_roll_from_boxes(
+                boxes=staff_result.quantized_boxes,
+                lines=staff_result.lines,
+                base_midi=base_midi,  # same base MIDI
+                ticks_per_px=4,  # must match build_note_events
+                resolution=480,
+                tempo=tempo_bpm,
+                width_px=1400,
+                dpi=180,
+            )
 
-
-
-    # Create files for playback and download
+    # 5) Write MIDI bytes to a temp file and (optionally) synthesize to WAV
     midi_download_path = None
     audio_play_path = None
 
     if midi_result.midi_bytes:
-        # Create a temporary file for MIDI download
         with tempfile.NamedTemporaryFile(suffix=".mid", delete=False) as tmp:
             tmp.write(midi_result.midi_bytes)
             midi_download_path = tmp.name
 
-        # Try to convert to audio for playback
         audio_play_path = midi_to_audio(midi_download_path)
         if audio_play_path is None:
-            # If conversion fails, use the MIDI file as fallback
             audio_play_path = midi_download_path
 
-    # Get note name
+    # 6) Compute base‐note display string
     note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
     octave = (base_midi // 12) - 1
     note_name = note_names[base_midi % 12]
     base_note_display = f"{note_name}{octave} (MIDI: {base_midi})"
 
+    # 7) **Return exactly these five values**.
+    #    Make sure piano_roll is first in the tuple:
     return (
         piano_roll,
         base_note_display,
