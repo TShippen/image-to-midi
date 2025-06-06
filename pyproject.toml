@@ -21,6 +21,7 @@ music21 = "^9.5.0"
 pretty-midi = "^0.2.10"
 soundfile = "^0.13.1"
 setuptools = "^80.6.0"
+pypianoroll = "^1.0.4"
 
 
 [build-system]
