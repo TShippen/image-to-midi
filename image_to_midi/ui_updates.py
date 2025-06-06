@@ -15,8 +15,7 @@ from image_to_midi.visualization import (
     create_binary_visualization,
     create_detection_visualizations,
     create_staff_result_visualizations,
-    create_piano_roll_from_events,
-    create_piano_roll_from_boxes,
+    create_piano_roll_simple,
 )
 
 from image_to_midi.midi_utils import midi_to_audio
@@ -142,38 +141,7 @@ def update_midi_view(
     # 3) Build piano_roll from events if there are any
     piano_roll = None
     if midi_result.events:
-        piano_roll = create_piano_roll_from_events(
-            midi_result.events, width_px=1400, dpi=180
-        )
-    else:
-        # 4) Fallback: re‐fetch StaffResult so we can plot boxes→Multitrack
-        staff_result = cached_staff_creation(
-            image_id,
-            threshold,
-            min_area,
-            max_area,
-            min_aspect,
-            max_aspect,
-            method,
-            num_lines,
-            height_factor,
-        )
-        if (
-            staff_result
-            and staff_result.quantized_boxes
-            and staff_result.lines is not None
-            and staff_result.lines.size > 0
-        ):
-            piano_roll = create_piano_roll_from_boxes(
-                boxes=staff_result.quantized_boxes,
-                lines=staff_result.lines,
-                base_midi=base_midi,  # same base MIDI
-                ticks_per_px=4,  # must match build_note_events
-                resolution=480,
-                tempo=tempo_bpm,
-                width_px=1400,
-                dpi=180,
-            )
+        piano_roll = create_piano_roll_simple(midi_result.events)
 
     # 5) Write MIDI bytes to a temp file and (optionally) synthesize to WAV
     midi_download_path = None
