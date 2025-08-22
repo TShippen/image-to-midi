@@ -15,7 +15,7 @@ from image_to_midi.visualization import (
     create_binary_visualization,
     create_detection_visualizations,
     create_staff_result_visualizations,
-    create_piano_roll_simple,
+    create_piano_roll_visualization,
 )
 
 from image_to_midi.midi_utils import midi_to_audio
@@ -141,7 +141,7 @@ def update_midi_view(
     # 3) Build piano_roll from events if there are any
     piano_roll = None
     if midi_result.events:
-        piano_roll = create_piano_roll_simple(midi_result.events)
+        piano_roll = create_piano_roll_visualization(midi_result.events)
 
     # 5) Write MIDI bytes to a temp file and (optionally) synthesize to WAV
     midi_download_path = None

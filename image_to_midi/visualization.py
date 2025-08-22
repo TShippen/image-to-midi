@@ -7,7 +7,6 @@ providing a consistent interface for creating visual representations of each sta
 
 import cv2
 import numpy as np
-import pypianoroll
 from collections.abc import Sequence
 from matplotlib.figure import Figure
 
@@ -21,202 +20,118 @@ from image_to_midi.models.pipeline_models import (
 from image_to_midi.models.visualization_models import VisualizationSet
 
 
-# -----------------------------------------------------------------------------
-# 1) If you already have a List[MidiEvent], convert it to a pypianoroll.Multitrack
-# -----------------------------------------------------------------------------
-def midi_events_to_multitrack(
+def create_piano_roll_visualization(
     events: Sequence[MidiEvent],
-    resolution: int = 480,
-    tempo: int = 120,
-) -> pypianoroll.Multitrack:
-    """Convert MidiEvent list to pypianoroll.Multitrack for visualization.
-
-    Args:
-        events: Sequence of MidiEvent objects.
-        resolution: Ticks per quarter note (default 480).
-        tempo: BPM for tempo array (default 120).
-
-    Returns:
-        pypianoroll.Multitrack object ready for plotting.
-    """
-    if not events:
-        # Return empty Multitrack if no events
-        return pypianoroll.Multitrack(resolution=resolution)
-
-    # 1) Determine the last tick needed
-    max_tick = max(e.start_tick + e.duration_tick for e in events)
-
-    # 2) Allocate a (max_tick × 128) array of zeros
-    pianoroll = np.zeros((max_tick, 128), dtype=np.uint8)
-
-    # 3) For each MidiEvent, fill velocity=127 from start_tick to end_tick
-    for event in events:
-        if 0 <= event.note < 128:
-            start = event.start_tick
-            end = start + event.duration_tick
-            pianoroll[start:end, event.note] = 127
-
-    # 4) Build a single StandardTrack
-    track = pypianoroll.StandardTrack(
-        name="Generated Track",
-        program=0,  # Acoustic Grand Piano
-        is_drum=False,  # pitched notes
-        pianoroll=pianoroll,
-    )
-
-    # 5) Create a constant‐tempo array of length = max_tick
-    tempo_array = np.full((max_tick,), tempo, dtype=np.float64)
-
-    # 6) Wrap into a Multitrack
-    return pypianoroll.Multitrack(
-        resolution=resolution,
-        tempo=tempo_array,
-        tracks=[track],
-    )
-
-
-def create_piano_roll_simple(
-    events: Sequence[MidiEvent],
+    *,
+    width_px: int = 1200,
+    note_h_in: float = 0.28,
+    max_h_in: float = 12.0,
+    min_h_in: float = 2.0,
+    dpi: int = 150,
+    margin_frac: float = 0.05          # white gap above & below each bar
 ) -> Figure:
     """
-    A minimal piano-roll helper that calls pypianoroll.plot() with improved
-    scaling to show only the active pitch range.
+    Return a Matplotlib piano-roll figure with note name labels.
 
-    Args:
-        events: Sequence of MidiEvent (with .note, .start_tick, .duration_tick).
+    A bar now sits fully between the black guide-lines:
 
-    Returns:
-        A matplotlib Figure containing one piano roll.
+        ─────── guide line at pitch-0.5
+          ███   bar (pitch row interior)
+        ─────── guide line at pitch+0.5
+
+    Parameters
+    ----------
+    events        : Sequence[MidiEvent]  (needs .note, .start_tick, .duration_tick)
+    width_px      : logical bitmap width; Gradio will scale the <img>.
+    note_h_in     : physical height of one pitch row when few rows are present.
+    max_h_in/min_h_in : clamp total figure height, inches.
+    dpi           : raster DPI.
+    margin_frac   : fraction of a row left clear at top & bottom of every bar.
     """
     import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+    from matplotlib.colors import hsv_to_rgb
 
-    # If no events, display a “no data” placeholder
+    # ---------- empty case ----------
     if not events:
-        fig, ax = plt.subplots()
-        ax.text(
-            0.5, 0.5, "No MIDI events", ha="center", va="center", transform=ax.transAxes
-        )
+        fig, ax = plt.subplots(figsize=(width_px / dpi, min_h_in), dpi=dpi)
+        ax.text(0.5, 0.5, "No MIDI events", ha="center", va="center",
+                transform=ax.transAxes)
         ax.axis("off")
         return fig
 
-    # 1) Convert events → Multitrack
-    multitrack = midi_events_to_multitrack(events)
+    # ---------- basic extents ----------
+    lo_note  = min(e.note for e in events)
+    hi_note  = max(e.note for e in events)
+    lo_tick  = min(e.start_tick for e in events)
+    hi_tick  = max(e.start_tick + e.duration_tick for e in events)
 
-    # 2) Create a Matplotlib Figure and one Axes per track
-    n_tracks = len(multitrack.tracks)
-    fig, axs = plt.subplots(n_tracks, 1)
+    pitch_span = hi_note - lo_note + 1          # number of rows
 
-    # If there is only one track, axs is a single Axes (not a list), so wrap it
-    if n_tracks == 1:
-        axs = [axs]
+    # ---------- figure size ----------
+    width_in  = width_px / dpi
+    height_in = max(min_h_in, min(max_h_in, pitch_span * note_h_in))
+    fig, ax   = plt.subplots(figsize=(width_in, height_in), dpi=dpi)
 
-    # 3) Let pypianoroll draw onto those axes with better labels
-    multitrack.plot(axs=axs, ytick='pitch', yticklabel='number')
+    # ---------- axes limits ----------
+    ax.set_xlim(lo_tick, hi_tick)
+    ax.set_ylim(lo_note - 0.5, hi_note + 0.5)   # rows are centred on ints
 
-    # 4) Scale y-axis to show only active pitch range
-    for i, track in enumerate(multitrack.tracks):
-        if track.pianoroll.size > 0:
-            # Find the range of active pitches
-            active_pitches = np.any(track.pianoroll, axis=0)
-            if np.any(active_pitches):
-                lowest = int(np.min(np.where(active_pitches)[0]))
-                highest = int(np.max(np.where(active_pitches)[0]))
+    # ---------- guide lines at row boundaries (half-integers) ----------
+    for k in range(pitch_span + 1):             # one extra for top border
+        y = lo_note - 0.5 + k                   # 59.5, 60.5, …
+        ax.axhline(y, color="black", linewidth=1, zorder=0)
 
-                # Add small padding around the range
-                padding = 3
-                axs[i].set_ylim(max(0, lowest - padding), min(127, highest + padding))
+    # ---------- draw note rectangles fully inside each row ----------
+    cell_h   = 1 - 2 * margin_frac             # height of coloured bar
+    y_shift  = 0.5 - margin_frac               # distance from pitch number
+                                               #   to bar *top*
+    for ev in events:
+        rgb = hsv_to_rgb(((ev.note % 12) / 12.0, 0.8, 0.85))
+        ax.add_patch(
+            patches.Rectangle(
+                (ev.start_tick, ev.note - y_shift),     # bottom-left
+                ev.duration_tick,                       # width
+                cell_h,                                 # height
+                facecolor=rgb,
+                edgecolor="black",
+                linewidth=0.8,
+                zorder=1
+            )
+        )
 
-    # 4) Optionally tighten layout, then return
+    # ---------- add note name labels on Y-axis ----------
+    # Create note name labels for all visible notes
+    note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+    visible_notes = range(lo_note, hi_note + 1)
+    y_ticks = []
+    y_labels = []
+    
+    for note_num in visible_notes:
+        y_ticks.append(note_num)
+        note_name = note_names[note_num % 12]
+        octave = (note_num // 12) - 1
+        y_labels.append(f"{note_name}{octave}")
+    
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels(y_labels, fontsize=8)
+    
+    # ---------- cosmetics ----------
+    ax.set_xticks([])  # Hide X-axis ticks
+    ax.set_xlabel("Time (ticks)", fontsize=10)
+    ax.set_ylabel("Note", fontsize=10)
+    
+    # Keep the left spine for Y-axis labels, hide others
+    for spine_name, spine in ax.spines.items():
+        if spine_name != 'left':
+            spine.set_visible(False)
+    
+    ax.set_facecolor("white")
     fig.tight_layout()
+
     return fig
 
 
-# -----------------------------------------------------------------------------
-# 2) New: boxes_to_multitrack → convert NoteBox + staff lines directly into a Multitrack
-# -----------------------------------------------------------------------------
-def boxes_to_multitrack(
-    boxes: Sequence[NoteBox],
-    lines: np.ndarray,
-    base_midi: int = 60,
-    *,
-    ticks_per_px: int = 4,
-    resolution: int = 480,
-    tempo: int = 120,
-) -> pypianoroll.Multitrack:
-    """
-    Convert a list of quantized NoteBox objects directly into a pypianoroll.Multitrack.
-
-    Args:
-        boxes:      Sequence of NoteBox (already snapped to staff lines).
-        lines:      1D array of staff-line Y positions (length = n_lines, top→bottom).
-        base_midi:  MIDI number for the bottom staff line (e.g. 60 = C4).
-        ticks_per_px: How many MIDI ticks per horizontal pixel.
-        resolution: MIDI ticks per quarter note (for the Multitrack header).
-        tempo:      Constant BPM for the tempo track.
-
-    Returns:
-        A pypianoroll.Multitrack containing exactly one StandardTrack.
-    """
-    if not boxes or lines is None or lines.size == 0:
-        # No boxes or no lines means “empty” Multitrack
-        return pypianoroll.Multitrack(resolution=resolution)
-
-    # 1) Build a mini‐list of (pitch, start_tick, duration_tick)
-    events: list[tuple[int, int, int]] = []
-    n_lines = lines.size
-
-    for b in boxes:
-        # Vertical center of the box
-        center_y = b.y + b.h / 2.0
-
-        # Find nearest staff‐line index (0 = top, n_lines-1 = bottom)
-        idx = int(np.argmin(np.abs(lines - center_y)))
-
-        # Convert line index into a MIDI pitch: bottom line = base_midi
-        # (lines are top→bottom, so invert)
-        pitch = base_midi + (n_lines - 1 - idx)
-
-        # Convert horizontal coordinates into ticks
-        start_tick = int(b.x * ticks_per_px)
-        duration_tick = max(int(b.w * ticks_per_px), 1)
-
-        events.append((pitch, start_tick, duration_tick))
-
-    # 2) Figure out how many ticks we need total
-    max_tick = max(start + dur for (_pitch, start, dur) in events)
-    n_rows = max_tick + 1  # +1 so that an event ending at max_tick still fits
-
-    # 3) Allocate a (n_rows × 128) uint8 array, all zeros
-    pianoroll = np.zeros((n_rows, 128), dtype=np.uint8)
-
-    # 4) Fill in each note’s ticks with velocity=127
-    for pitch, start_tick, duration_tick in events:
-        if 0 <= pitch < 128:
-            end_tick = start_tick + duration_tick
-            pianoroll[start_tick:end_tick, pitch] = 127
-
-    # 5) Wrap into one StandardTrack
-    track = pypianoroll.StandardTrack(
-        name="BoxTrack",
-        program=0,  # Acoustic Grand Piano
-        is_drum=False,  # pitched notes
-        pianoroll=pianoroll,
-    )
-
-    # 6) Build a constant‐tempo array of length = n_rows
-    tempo_array = np.full((n_rows,), tempo, dtype=np.float64)
-
-    # 7) Return the Multitrack
-    return pypianoroll.Multitrack(
-        resolution=resolution,
-        tempo=tempo_array,
-        tracks=[track],
-    )
-
-
-# -----------------------------------------------------------------------------
-# 3) Everything else stays the same (no changes needed to these helpers)
-# -----------------------------------------------------------------------------
 def create_binary_visualization(binary_mask: np.ndarray | None) -> np.ndarray | None:
     """Create an RGB view of a binary mask, or None if no mask given."""
     if binary_mask is None:
@@ -410,10 +325,10 @@ def create_all_visualizations(
         image.shape[:2], staff_result
     )
 
-    # 4) Piano-roll: prefer “events” path; fallback to “boxes” path
+    # 4) Piano-roll visualization
     piano_roll = None
     if midi_result and midi_result.events:
-        piano_roll = create_piano_roll_simple(midi_result.events)
+        piano_roll = create_piano_roll_visualization(midi_result.events)
 
     return VisualizationSet(
         binary_mask=binary_mask,

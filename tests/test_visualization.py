@@ -52,20 +52,24 @@ def test_create_staff_visualization_valid():
 
 
 def test_create_piano_roll_empty():
-    img = create_piano_roll_visualization([])
-    assert img.shape == (20, 200, 3)
+    from matplotlib.figure import Figure
+    fig = create_piano_roll_visualization([])
+    assert isinstance(fig, Figure)
 
 
 def test_create_piano_roll_nonempty():
+    from matplotlib.figure import Figure
     from image_to_midi.models.core_models import MidiEvent
 
     evts = [
         MidiEvent(note=60, start_tick=0, duration_tick=10),
         MidiEvent(note=61, start_tick=10, duration_tick=5),
     ]
-    img = create_piano_roll_visualization(evts)
-    # height=(61-60+1)*10=20, width=int(15*1.1)=16
-    assert img.shape == (20, 16, 3)
+    fig = create_piano_roll_visualization(evts)
+    assert isinstance(fig, Figure)
+    # Check that the figure has the expected Y-axis limits
+    ax = fig.get_axes()[0]
+    assert ax.get_ylim() == (59.5, 61.5)  # Should cover notes 60-61
 
 
 def test_create_detection_visualizations_invalid():
