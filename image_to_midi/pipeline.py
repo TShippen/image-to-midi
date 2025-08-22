@@ -8,6 +8,7 @@ separating business logic from visualization and UI concerns.
 import tempfile
 import logging
 import cv2
+import numpy as np
 
 from image_to_midi.image_processing import mask_image
 from image_to_midi.note_detection import detect_notes as detect_note_boxes_raw
@@ -57,7 +58,7 @@ class ProcessingError(PipelineError):
     pass
 
 
-def process_binary_image(image, params):
+def process_binary_image(image: np.ndarray | None, params) -> BinaryResult:
     """Convert image to binary mask.
 
     Args:
@@ -84,7 +85,7 @@ def process_binary_image(image, params):
         return BinaryResult()
 
 
-def detect_notes(binary_result, params):
+def detect_notes(binary_result: BinaryResult, params) -> DetectionResult:
     """Detect note-like shapes in the binary image.
 
     Args:
@@ -120,7 +121,7 @@ def detect_notes(binary_result, params):
         return DetectionResult()
 
 
-def create_staff(detection_result, params):
+def create_staff(detection_result: DetectionResult, params) -> StaffResult:
     """Create staff lines and quantize notes.
 
     Args:
@@ -166,7 +167,7 @@ def create_staff(detection_result, params):
         return StaffResult()
 
 
-def generate_midi(staff_result, params):
+def generate_midi(staff_result: StaffResult, params) -> MidiResult:
     """Generate MIDI from staff notes.
 
     Args:
@@ -240,8 +241,8 @@ def generate_midi(staff_result, params):
 
 
 def process_complete_pipeline(
-    image, image_params, detection_params, staff_params, midi_params
-):
+    image: np.ndarray | None, image_params, detection_params, staff_params, midi_params
+) -> tuple[BinaryResult, DetectionResult, StaffResult, MidiResult, VisualizationSet]:
     """Process the complete image-to-MIDI pipeline.
 
     Args:

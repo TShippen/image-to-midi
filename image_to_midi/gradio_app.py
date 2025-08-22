@@ -1,3 +1,17 @@
+"""Gradio web interface for the image-to-MIDI converter.
+
+This module creates and configures the main Gradio web application interface
+for the image-to-MIDI conversion pipeline. It provides an interactive web UI
+where users can adjust processing parameters and see real-time updates of
+visualizations and outputs from each pipeline stage.
+
+The interface is organized into sections corresponding to each processing stage:
+- Binary image processing with threshold control
+- Note detection with area and aspect ratio filters  
+- Staff line generation with various fitting methods
+- MIDI generation with musical transformation options
+"""
+
 import logging
 import gradio as gr
 
@@ -31,20 +45,45 @@ method_descriptions = {
 
 
 # 3) Helpers
-def method_changed(method_value):
-    """Show or hide the Height Factor slider depending on method."""
+def method_changed(method_value: str) -> gr.update:
+    """Control visibility of Height Factor slider based on staff method selection.
+
+    Args:
+        method_value: Selected staff fitting method string.
+
+    Returns:
+        Gradio update object controlling slider visibility.
+    """
     return gr.update(visible=(method_value == "Adjustable"))
 
 
-def midi_note_label(x):
-    """Convert a MIDI number to e.g. 'C4 (MIDI: 60)'."""
+def midi_note_label(x: int) -> str:
+    """Convert a MIDI note number to human-readable format.
+
+    Args:
+        x: MIDI note number (0-127).
+
+    Returns:
+        Formatted string like 'C4 (MIDI: 60)' showing note name, octave, and number.
+    """
     names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
     note = names[x % 12] + str((x // 12) - 1)
     return f"{note} (MIDI: {x})"
 
 
-def initialize_app(image_id):
-    """Initialize all views with default parameter values."""
+def initialize_app(image_id: str) -> list:
+    """Initialize all pipeline visualizations with default parameter values.
+
+    Processes the registered image through all pipeline stages using default
+    parameters to generate initial visualizations for the Gradio interface.
+
+    Args:
+        image_id: Unique identifier for the registered image.
+
+    Returns:
+        List of visualization outputs for populating the Gradio interface,
+        including images, plots, text displays, and file paths.
+    """
     orig, binary = update_binary_view(image_id, 93)
     notes_rgb, notes_bin, note_count = update_detection_view(
         image_id, 93, 1.0, 5000.0, 0.1, 20.0
@@ -88,7 +127,17 @@ def initialize_app(image_id):
     ]
 
 
-def create_gradio_interface():
+def create_gradio_interface() -> gr.Blocks:
+    """Create and configure the main Gradio web interface.
+
+    Builds the complete web application interface with all UI components,
+    event handlers, and interactive controls for the image-to-MIDI conversion
+    pipeline. The interface is organized into tabbed sections corresponding
+    to each processing stage with real-time parameter adjustment and visualization.
+
+    Returns:
+        Configured Gradio Blocks interface ready for launching.
+    """
     with gr.Blocks(title="Image to MIDI Converter") as interface:
         gr.Markdown("# 🎵 Image to MIDI Converter")
         gr.Markdown(
@@ -261,9 +310,8 @@ def create_gradio_interface():
                         info="Rhythmic resolution for quantization.",
                     )
                     piano_roll = gr.Plot(
-                        label="Piano Roll Visualization",
-                        elem_id="piano-roll-plot"
-                        )
+                        label="Piano Roll Visualization", elem_id="piano-roll-plot"
+                    )
                     with gr.Row():
                         audio_player = gr.Audio(
                             label="Listen to the Music",

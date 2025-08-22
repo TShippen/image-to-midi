@@ -28,25 +28,26 @@ def create_piano_roll_visualization(
     max_h_in: float = 12.0,
     min_h_in: float = 2.0,
     dpi: int = 150,
-    margin_frac: float = 0.05          # white gap above & below each bar
+    margin_frac: float = 0.05,
 ) -> Figure:
-    """
-    Return a Matplotlib piano-roll figure with note name labels.
+    """Create a piano roll visualization of MIDI events with note labels.
 
-    A bar now sits fully between the black guide-lines:
+    Generates a horizontal timeline chart showing MIDI notes as colored bars,
+    with each row representing a different pitch. Notes are color-coded by
+    pitch class and include note name labels on the y-axis.
 
-        ─────── guide line at pitch-0.5
-          ███   bar (pitch row interior)
-        ─────── guide line at pitch+0.5
+    Args:
+        events: Sequence of MIDI events to visualize.
+        width_px: Logical bitmap width in pixels (default 1200).
+        note_h_in: Physical height per pitch row in inches (default 0.28).
+        max_h_in: Maximum figure height in inches (default 12.0).
+        min_h_in: Minimum figure height in inches (default 2.0).
+        dpi: Raster resolution for output (default 150).
+        margin_frac: Fraction of row height to leave as margin (default 0.05).
 
-    Parameters
-    ----------
-    events        : Sequence[MidiEvent]  (needs .note, .start_tick, .duration_tick)
-    width_px      : logical bitmap width; Gradio will scale the <img>.
-    note_h_in     : physical height of one pitch row when few rows are present.
-    max_h_in/min_h_in : clamp total figure height, inches.
-    dpi           : raster DPI.
-    margin_frac   : fraction of a row left clear at top & bottom of every bar.
+    Returns:
+        Matplotlib Figure object containing the piano roll visualization.
+        Returns a figure with "No MIDI events" message if events is empty.
     """
     import matplotlib.pyplot as plt
     import matplotlib.patches as patches
@@ -55,48 +56,49 @@ def create_piano_roll_visualization(
     # ---------- empty case ----------
     if not events:
         fig, ax = plt.subplots(figsize=(width_px / dpi, min_h_in), dpi=dpi)
-        ax.text(0.5, 0.5, "No MIDI events", ha="center", va="center",
-                transform=ax.transAxes)
+        ax.text(
+            0.5, 0.5, "No MIDI events", ha="center", va="center", transform=ax.transAxes
+        )
         ax.axis("off")
         return fig
 
     # ---------- basic extents ----------
-    lo_note  = min(e.note for e in events)
-    hi_note  = max(e.note for e in events)
-    lo_tick  = min(e.start_tick for e in events)
-    hi_tick  = max(e.start_tick + e.duration_tick for e in events)
+    lo_note = min(e.note for e in events)
+    hi_note = max(e.note for e in events)
+    lo_tick = min(e.start_tick for e in events)
+    hi_tick = max(e.start_tick + e.duration_tick for e in events)
 
-    pitch_span = hi_note - lo_note + 1          # number of rows
+    pitch_span = hi_note - lo_note + 1  # number of rows
 
     # ---------- figure size ----------
-    width_in  = width_px / dpi
+    width_in = width_px / dpi
     height_in = max(min_h_in, min(max_h_in, pitch_span * note_h_in))
-    fig, ax   = plt.subplots(figsize=(width_in, height_in), dpi=dpi)
+    fig, ax = plt.subplots(figsize=(width_in, height_in), dpi=dpi)
 
     # ---------- axes limits ----------
     ax.set_xlim(lo_tick, hi_tick)
-    ax.set_ylim(lo_note - 0.5, hi_note + 0.5)   # rows are centred on ints
+    ax.set_ylim(lo_note - 0.5, hi_note + 0.5)  # rows are centred on ints
 
     # ---------- guide lines at row boundaries (half-integers) ----------
-    for k in range(pitch_span + 1):             # one extra for top border
-        y = lo_note - 0.5 + k                   # 59.5, 60.5, …
+    for k in range(pitch_span + 1):  # one extra for top border
+        y = lo_note - 0.5 + k  # 59.5, 60.5, …
         ax.axhline(y, color="black", linewidth=1, zorder=0)
 
     # ---------- draw note rectangles fully inside each row ----------
-    cell_h   = 1 - 2 * margin_frac             # height of coloured bar
-    y_shift  = 0.5 - margin_frac               # distance from pitch number
-                                               #   to bar *top*
+    cell_h = 1 - 2 * margin_frac  # height of coloured bar
+    y_shift = 0.5 - margin_frac  # distance from pitch number
+    #   to bar *top*
     for ev in events:
         rgb = hsv_to_rgb(((ev.note % 12) / 12.0, 0.8, 0.85))
         ax.add_patch(
             patches.Rectangle(
-                (ev.start_tick, ev.note - y_shift),     # bottom-left
-                ev.duration_tick,                       # width
-                cell_h,                                 # height
+                (ev.start_tick, ev.note - y_shift),  # bottom-left
+                ev.duration_tick,  # width
+                cell_h,  # height
                 facecolor=rgb,
                 edgecolor="black",
                 linewidth=0.8,
-                zorder=1
+                zorder=1,
             )
         )
 
@@ -106,26 +108,26 @@ def create_piano_roll_visualization(
     visible_notes = range(lo_note, hi_note + 1)
     y_ticks = []
     y_labels = []
-    
+
     for note_num in visible_notes:
         y_ticks.append(note_num)
         note_name = note_names[note_num % 12]
         octave = (note_num // 12) - 1
         y_labels.append(f"{note_name}{octave}")
-    
+
     ax.set_yticks(y_ticks)
     ax.set_yticklabels(y_labels, fontsize=8)
-    
+
     # ---------- cosmetics ----------
     ax.set_xticks([])  # Hide X-axis ticks
     ax.set_xlabel("Time (ticks)", fontsize=10)
     ax.set_ylabel("Note", fontsize=10)
-    
+
     # Keep the left spine for Y-axis labels, hide others
     for spine_name, spine in ax.spines.items():
-        if spine_name != 'left':
+        if spine_name != "left":
             spine.set_visible(False)
-    
+
     ax.set_facecolor("white")
     fig.tight_layout()
 
@@ -133,7 +135,14 @@ def create_piano_roll_visualization(
 
 
 def create_binary_visualization(binary_mask: np.ndarray | None) -> np.ndarray | None:
-    """Create an RGB view of a binary mask, or None if no mask given."""
+    """Convert a binary mask to RGB format for display.
+
+    Args:
+        binary_mask: 2D binary image array, or None.
+
+    Returns:
+        3-channel RGB version of the binary mask, or None if input is None.
+    """
     if binary_mask is None:
         return None
     return cv2.cvtColor(binary_mask, cv2.COLOR_GRAY2RGB)
@@ -144,16 +153,21 @@ def create_note_detection_visualizations(
     binary_mask: np.ndarray | None,
     boxes: Sequence[NoteBox | tuple[int, int, int, int]],
 ) -> tuple[np.ndarray | None, np.ndarray | None]:
-    """
-    Overlay detection boxes on both the color image and its mask.
+    """Overlay detection bounding boxes on original and binary images.
+
+    Creates visualization images showing detected note boxes as red rectangles
+    overlaid on both the original color image and the binary mask version.
 
     Args:
-        original_image: H×W×3 BGR array, or None.
-        binary_mask:    H×W mask, or None.
-        boxes:          List of NoteBox or (x,y,w,h) tuples.
+        original_image: Original BGR image as H×W×3 array, or None.
+        binary_mask: Binary mask as H×W array, or None.
+        boxes: Sequence of NoteBox objects or (x,y,w,h) tuples representing
+               detected note bounding boxes.
 
     Returns:
-        (RGB-overlay, mask-overlay), either may be None if inputs are invalid.
+        Tuple of (RGB_overlay, mask_overlay) where RGB_overlay shows boxes
+        on the original image converted to RGB, and mask_overlay shows boxes
+        on the binary mask. Either may be None if inputs are invalid.
     """
     if original_image is None or binary_mask is None or not boxes:
         return None, None
@@ -183,17 +197,21 @@ def create_staff_visualization(
     lines: np.ndarray | None,
     fill_boxes: bool = True,
 ) -> np.ndarray | None:
-    """
-    Draw staff lines and (optionally filled) note boxes on a blank canvas.
+    """Create a visualization showing staff lines and note boxes.
+
+    Renders staff lines as red horizontal lines and note boxes as black
+    rectangles (filled or outlined) on a white canvas. Used to visualize
+    the staff line generation and note quantization results.
 
     Args:
-        image_shape: (height, width) in pixels.
-        notes:       Sequence of NoteBox objects.
-        lines:       1D array of Y-positions, or None.
-        fill_boxes:  If True, draw solid rectangles; else just outlines.
+        image_shape: Canvas dimensions as (height, width) in pixels.
+        notes: Sequence of NoteBox objects to draw.
+        lines: 1D array of staff line y-positions, or None.
+        fill_boxes: If True, draw filled rectangles; if False, draw outlines only.
 
     Returns:
-        H×W×3 uint8 image, or None if `notes` is empty or `lines` is None/empty.
+        RGB image as H×W×3 uint8 array showing the visualization, or None
+        if notes is empty or lines is None/empty.
     """
     if not notes or lines is None or lines.size == 0:
         return None
@@ -225,16 +243,19 @@ def create_detection_visualizations(
     binary_result: BinaryResult | None,
     detection_result: DetectionResult | None,
 ) -> tuple[np.ndarray | None, np.ndarray | None]:
-    """
-    High‐level “pipeline” wrapper around note detection visualizations.
+    """Create detection visualizations from pipeline results.
+
+    High-level wrapper that extracts data from pipeline result objects
+    and creates visualization images showing detected note boxes.
 
     Args:
-        image:            RGB image, or None.
-        binary_result:    may have `.binary_mask`, or None.
-        detection_result: may have `.note_boxes`, or None.
+        image: Input RGB image, or None.
+        binary_result: Binary processing result containing mask, or None.
+        detection_result: Note detection result containing boxes, or None.
 
     Returns:
-        (RGB overlay, mask overlay) or (None, None) on invalid inputs.
+        Tuple of (RGB_overlay, mask_overlay) showing detected boxes on
+        original and binary images, or (None, None) if inputs are invalid.
     """
     if (
         image is None
@@ -257,15 +278,20 @@ def create_staff_result_visualizations(
     image_shape: tuple[int, int],
     staff_result: StaffResult | None,
 ) -> tuple[np.ndarray | None, np.ndarray | None]:
-    """
-    High‐level wrapper for drawing original vs. quantized staff boxes.
+    """Create visualizations of original and quantized staff results.
+
+    High-level wrapper that generates two visualizations: one showing
+    original detected notes with staff lines, and another showing the
+    same staff lines with quantized note positions.
 
     Args:
-        image_shape:  (height, width) or None.
-        staff_result: may have `.lines`, `.original_boxes`, `.quantized_boxes`, or None.
+        image_shape: Canvas dimensions as (height, width) in pixels.
+        staff_result: Staff processing result containing lines and note boxes, or None.
 
     Returns:
-        (orig_viz, quant_viz) or (None, None) on invalid inputs.
+        Tuple of (original_viz, quantized_viz) showing staff lines with
+        original and quantized notes respectively, or (None, None) if
+        staff_result is invalid.
     """
     if (
         staff_result is None
@@ -296,18 +322,22 @@ def create_all_visualizations(
     staff_result: StaffResult | None,
     midi_result: MidiResult | None,
 ) -> VisualizationSet:
-    """
-    Bundle everything into one VisualizationSet for the UI.
+    """Create complete set of visualizations from all pipeline results.
+
+    Master function that generates all visualization types from the outputs
+    of each pipeline stage, bundling them into a single VisualizationSet
+    object for easy consumption by the user interface.
 
     Args:
-        image:            RGB image, or None.
-        binary_result:    may have `.binary_mask`, or None.
-        detection_result: may have `.note_boxes`, or None.
-        staff_result:     may have lines/boxes, or None.
-        midi_result:      may have `.events`, or None.
+        image: Input RGB image, or None.
+        binary_result: Binary processing result, or None.
+        detection_result: Note detection result, or None.
+        staff_result: Staff processing result, or None.
+        midi_result: MIDI generation result, or None.
 
     Returns:
-        A VisualizationSet instance (fields inside it may be None).
+        VisualizationSet containing all generated visualizations. Individual
+        fields may be None if corresponding inputs were invalid or processing failed.
     """
     if image is None:
         return VisualizationSet()

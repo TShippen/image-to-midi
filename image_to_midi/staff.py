@@ -1,3 +1,11 @@
+"""Staff line generation and note quantization functions.
+
+This module provides functions for generating staff lines from detected notes
+and quantizing note positions to those staff lines. It supports different
+methods for handling note height variations and includes utilities for
+calculating fit accuracy and pitch variation metrics.
+"""
+
 import numpy as np
 from image_to_midi.models import NoteBox
 
