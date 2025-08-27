@@ -6,6 +6,7 @@ separating business logic from visualization and UI concerns.
 """
 
 import tempfile
+import os
 import logging
 import cv2
 import numpy as np
@@ -216,12 +217,15 @@ def generate_midi(staff_result: StaffResult, params) -> MidiResult:
         # Generate MIDI file
         midi_bytes = write_midi_file(events, params.tempo_bpm)
 
-        # Save MIDI to a temporary file for playback
+        # Save MIDI to a temporary file for playback (kept for legacy compatibility)
+        # Note: This is only used internally; ui_updates.py handles user-facing files
         midi_file_path = ""
         if midi_bytes:
-            with tempfile.NamedTemporaryFile(suffix=".mid", delete=False) as tmp:
-                tmp.write(midi_bytes)
-                midi_file_path = tmp.name
+            temp_midi = tempfile.NamedTemporaryFile(suffix=".mid", delete=False, dir=os.environ.get('GRADIO_TEMP_DIR'))
+            temp_midi.write(midi_bytes)
+            temp_midi.flush()
+            midi_file_path = temp_midi.name
+            temp_midi.close()
 
         # Get base note name
         note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]

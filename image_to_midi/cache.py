@@ -28,7 +28,7 @@ from image_to_midi.pipeline import (
 BINARY_CACHE_SIZE = 32
 DETECTION_CACHE_SIZE = 32
 STAFF_CACHE_SIZE = 32
-MIDI_CACHE_SIZE = 16  # Fewer entries needed as this is the most complex
+MIDI_CACHE_SIZE = 4  # Very small cache - parameter space is huge, cache hits unlikely
 
 
 # Stage 1: Binary Processing

@@ -131,6 +131,11 @@ def create_piano_roll_visualization(
     ax.set_facecolor("white")
     fig.tight_layout()
 
+    # Important: Ensure matplotlib closes the figure after Gradio uses it
+    # This prevents memory leaks from accumulated figure objects
+    import matplotlib
+    matplotlib.use('Agg')  # Use non-interactive backend
+    
     return fig
 
 

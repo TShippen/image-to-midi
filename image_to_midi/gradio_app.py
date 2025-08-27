@@ -138,7 +138,11 @@ def create_gradio_interface() -> gr.Blocks:
     Returns:
         Configured Gradio Blocks interface ready for launching.
     """
-    with gr.Blocks(title="Image to MIDI Converter") as interface:
+    # Configure automatic cache cleanup: check every 30 minutes, delete files older than 1 hour
+    with gr.Blocks(
+        title="Image to MIDI Converter",
+        delete_cache=(1800, 3600)
+    ) as interface:
         gr.Markdown("# 🎵 Image to MIDI Converter")
         gr.Markdown(
             "Convert a paint-splatter image to music! "
@@ -316,6 +320,8 @@ def create_gradio_interface() -> gr.Blocks:
                         audio_player = gr.Audio(
                             label="Listen to the Music",
                             type="filepath",
+                            format="wav",
+                            autoplay=False
                         )
                         midi_download = gr.File(
                             label="Download MIDI File",
@@ -425,10 +431,40 @@ def create_gradio_interface() -> gr.Blocks:
                 ],
             )
 
+    # Add cleanup handler for when users disconnect
+    def cleanup_session():
+        """Clean up session files when user disconnects."""
+        try:
+            from image_to_midi.ui_updates import get_file_manager
+            file_manager = get_file_manager()
+            file_manager.cleanup_all()
+        except Exception:
+            # Silently ignore cleanup errors to avoid disrupting the user experience
+            pass
+    
+    # Register unload event for immediate cleanup (no 60-minute delay)
+    interface.unload(cleanup_session)
+    
     return interface
 
 
 if __name__ == "__main__":
+    import warnings
+    import logging
+    import asyncio
+    import sys
+    
+    # Suppress the Windows-specific asyncio connection errors
+    # These occur when connections are closed and are harmless
+    warnings.filterwarnings("ignore", category=ConnectionResetError)
+    
+    # Also reduce logging verbosity for asyncio
+    logging.getLogger("asyncio").setLevel(logging.WARNING)
+    
+    # Windows-specific: Use SelectorEventLoop to avoid ProactorEventLoop issues
+    if sys.platform == 'win32':
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    
     demo = create_gradio_interface()
     demo.launch(
         share=False,

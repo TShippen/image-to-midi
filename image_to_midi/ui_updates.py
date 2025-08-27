@@ -10,7 +10,9 @@ parameters, building upon the cached pipeline functions for maximum efficiency.
 """
 
 import tempfile
+import os
 from functools import lru_cache
+from uuid import uuid4
 
 from image_to_midi.cache import (
     cached_binary_processing,
@@ -28,9 +30,44 @@ from image_to_midi.visualization import (
 
 from image_to_midi.midi_utils import midi_to_audio
 from image_to_midi.music_transformations import NOTE_VALUE_TO_GRID
+from image_to_midi.file_manager import GradioFileManager
 
 # Global constant
 from image_to_midi.app_state import get_image_by_id
+
+# Create a global file manager instance
+# In production, this should be per-session, but for simplicity we use a global one
+_file_manager = GradioFileManager(session_id=str(uuid4()))
+
+
+def get_file_manager() -> GradioFileManager:
+    """Get the current file manager instance.
+    
+    Returns:
+        The global file manager instance.
+    """
+    return _file_manager
+
+
+def cleanup_cache() -> str:
+    """Manually trigger cache cleanup.
+    
+    Returns:
+        Status message indicating cleanup completion.
+    """
+    global _file_manager  # Declare global at the beginning
+    from image_to_midi.cache import clear_all_caches
+    
+    # Clear computation caches
+    clear_all_caches()
+    
+    # Clear file manager files
+    _file_manager.cleanup_all()
+    
+    # Recreate file manager for next operations
+    _file_manager = GradioFileManager(session_id=str(uuid4()))
+    
+    return "Cache and temporary files cleared successfully!"
 
 
 @lru_cache(maxsize=32)
@@ -235,17 +272,27 @@ def update_midi_view(
         piano_roll = create_piano_roll_visualization(midi_result.events)
 
     # Write MIDI bytes to temporary file and synthesize to audio
+    # Using single-active-file pattern: overwrites previous files
     midi_download_path = None
     audio_play_path = None
 
     if midi_result.midi_bytes:
-        with tempfile.NamedTemporaryFile(suffix=".mid", delete=False) as tmp:
-            tmp.write(midi_result.midi_bytes)
-            midi_download_path = tmp.name
-
+        # Use file manager to handle file lifecycle (overwrites existing)
+        midi_download_path = _file_manager.write_file("midi", midi_result.midi_bytes, ".mid")
+        
+        # Generate audio from MIDI (also overwrites existing)
+        wav_path = _file_manager.get_temp_path("wav", ".wav")
         audio_play_path = midi_to_audio(midi_download_path)
+        
+        # If audio synthesis fails, fall back to MIDI file
         if audio_play_path is None:
             audio_play_path = midi_download_path
+        else:
+            # Move the generated WAV to our managed location
+            import shutil
+            if audio_play_path != wav_path:
+                shutil.move(audio_play_path, wav_path)
+                audio_play_path = wav_path
 
     # Create base note display string for UI
     note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]

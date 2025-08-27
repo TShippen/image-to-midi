@@ -118,7 +118,6 @@ def write_midi_file(
     return buffer.getvalue()
 
 
-@lru_cache(maxsize=None)
 def midi_to_audio(midi_path: str) -> str | None:
     """Synthesize a MIDI file to audio using software synthesis.
 
@@ -133,9 +132,6 @@ def midi_to_audio(midi_path: str) -> str | None:
         Path to the generated WAV file, or None if synthesis failed.
         The WAV file will have the same base name as the input MIDI file.
 
-    Note:
-        Results are cached indefinitely using lru_cache to avoid redundant
-        synthesis of the same MIDI file.
     """
     try:
         # Load MIDI file and synthesize to audio
