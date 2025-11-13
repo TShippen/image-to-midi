@@ -13,6 +13,8 @@ The interface is organized into sections corresponding to each processing stage:
 """
 
 import logging
+from uuid import uuid4
+
 import gradio as gr
 
 from image_to_midi.app_state import load_fixed_image, get_image_id
@@ -71,7 +73,7 @@ def midi_note_label(x: int) -> str:
     return f"{note} (MIDI: {x})"
 
 
-def initialize_app(image_id: str) -> list:
+def initialize_app(image_id: str, session_id: str) -> list:
     """Initialize all pipeline visualizations with default parameter values.
 
     Processes the registered image through all pipeline stages using default
@@ -79,6 +81,7 @@ def initialize_app(image_id: str) -> list:
 
     Args:
         image_id: Unique identifier for the registered image.
+        session_id: Unique session identifier for file management isolation.
 
     Returns:
         List of visualization outputs for populating the Gradio interface,
@@ -93,6 +96,7 @@ def initialize_app(image_id: str) -> list:
     )
     p_roll, base_note, audio_path, midi_path, audio_dl_path = update_midi_view(
         image_id,
+        session_id,
         93,
         1.0,
         5000.0,
@@ -151,6 +155,9 @@ def create_gradio_interface() -> gr.Blocks:
 
         # Holds the current image ID across callbacks
         image_state = gr.State(initial_image_id)
+
+        # Unique session ID for per-session file management
+        session_state = gr.State(str(uuid4()))
 
         with gr.Row():
             with gr.Column(scale=1):
@@ -368,7 +375,7 @@ def create_gradio_interface() -> gr.Blocks:
         # INITIALIZE on page load
         interface.load(
             fn=initialize_app,
-            inputs=[image_state],
+            inputs=[image_state, session_state],
             outputs=output_components,
         )
 
@@ -418,7 +425,7 @@ def create_gradio_interface() -> gr.Blocks:
         for p in note_detection_params + staff_params + midi_params:
             p.change(
                 fn=update_midi_view,
-                inputs=[image_state]
+                inputs=[image_state, session_state]
                 + note_detection_params
                 + staff_params
                 + midi_params,
@@ -432,18 +439,22 @@ def create_gradio_interface() -> gr.Blocks:
             )
 
     # Add cleanup handler for when users disconnect
-    def cleanup_session():
-        """Clean up session files when user disconnects."""
+    def cleanup_session_handler(session_id: str) -> None:
+        """Clean up session files when user disconnects.
+
+        Args:
+            session_id: Unique session identifier to clean up.
+        """
         try:
-            from image_to_midi.ui_updates import get_file_manager
-            file_manager = get_file_manager()
-            file_manager.cleanup_all()
-        except Exception:
-            # Silently ignore cleanup errors to avoid disrupting the user experience
-            pass
-    
+            from image_to_midi.ui_updates import cleanup_session
+            cleanup_session(session_id)
+            logger.info(f"Cleaned up session: {session_id}")
+        except Exception as e:
+            # Log error but don't disrupt user experience
+            logger.warning(f"Cleanup failed for session {session_id}: {e}")
+
     # Register unload event for immediate cleanup (no 60-minute delay)
-    interface.unload(cleanup_session)
+    interface.unload(cleanup_session_handler, inputs=[session_state])
     
     return interface
 
