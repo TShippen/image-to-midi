@@ -231,6 +231,7 @@ def update_staff_view(
 @lru_cache(maxsize=16)
 def update_midi_view(
     image_id: str,
+    session_id: str,
     threshold: int,
     min_area: float,
     max_area: float,
@@ -251,10 +252,12 @@ def update_midi_view(
 
     Processes an image through the complete pipeline to generate MIDI output,
     creates a piano roll visualization, synthesizes audio, and prepares
-    downloadable files for the user.
+    downloadable files for the user. Uses per-session file management to
+    ensure files are isolated between concurrent users.
 
     Args:
         image_id: Unique identifier for the registered image.
+        session_id: Unique session identifier for file management isolation.
         threshold: Binarization threshold from binary processing.
         min_area: Minimum acceptable contour area from detection.
         max_area: Maximum acceptable contour area from detection.
@@ -276,6 +279,9 @@ def update_midi_view(
         where piano_roll_fig is a matplotlib Figure, display text is a string,
         and paths are file paths for download/playback.
     """
+    # Get per-session file manager for isolated file handling
+    file_manager = get_or_create_file_manager(session_id)
+
     # Convert note value to grid size and quantization strength
     grid_size = NOTE_VALUE_TO_GRID[note_value]
     quantize_strength = 1.0 if quantize else 0.0
@@ -313,10 +319,10 @@ def update_midi_view(
 
     if midi_result.midi_bytes:
         # Use file manager to handle file lifecycle (overwrites existing)
-        midi_download_path = _file_manager.write_file("midi", midi_result.midi_bytes, ".mid")
-        
+        midi_download_path = file_manager.write_file("midi", midi_result.midi_bytes, ".mid")
+
         # Generate audio from MIDI (also overwrites existing)
-        wav_path = _file_manager.get_temp_path("wav", ".wav")
+        wav_path = file_manager.get_temp_path("wav", ".wav")
         audio_play_path = midi_to_audio(midi_download_path)
         
         # If audio synthesis fails, fall back to MIDI file
