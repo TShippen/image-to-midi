@@ -438,22 +438,18 @@ def create_gradio_interface() -> gr.Blocks:
                 ],
             )
 
-    # Add cleanup handler for when users disconnect
-    def cleanup_session_handler(session_id: str) -> None:
-        """Clean up session files when user disconnects.
-
-        Args:
-            session_id: Unique session identifier to clean up.
-        """
+    # Add cleanup handler for when app shuts down
+    def cleanup_all_sessions() -> None:
+        """Clean up all session files when Gradio app shuts down."""
         try:
-            from image_to_midi.ui_updates import cleanup_session
-            cleanup_session(session_id)
+            from image_to_midi.ui_updates import cleanup_cache
+            cleanup_cache(session_id=None)  # Clean all sessions
+            logger.info("Cleaned up all sessions on app shutdown")
         except Exception as e:
-            # Log error but don't disrupt user experience
-            logger.warning(f"Cleanup failed for session {session_id}: {e}")
+            logger.warning(f"Cleanup failed on shutdown: {e}")
 
-    # Register unload event for immediate cleanup (no 60-minute delay)
-    interface.unload(cleanup_session_handler, inputs=[session_state])
+    # Register unload event to clean up all sessions on app shutdown
+    interface.unload(cleanup_all_sessions)
     
     return interface
 
