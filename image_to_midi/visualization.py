@@ -5,6 +5,9 @@ This module centralizes all visualization functions used throughout the pipeline
 providing a consistent interface for creating visual representations of each stage.
 """
 
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend (must be set before importing pyplot)
+
 import cv2
 import numpy as np
 from collections.abc import Sequence
@@ -131,11 +134,7 @@ def create_piano_roll_visualization(
     ax.set_facecolor("white")
     fig.tight_layout()
 
-    # Important: Ensure matplotlib closes the figure after Gradio uses it
-    # This prevents memory leaks from accumulated figure objects
-    import matplotlib
-    matplotlib.use('Agg')  # Use non-interactive backend
-    
+    # Note: Gradio's gr.Plot component handles figure cleanup after rendering
     return fig
 
 
