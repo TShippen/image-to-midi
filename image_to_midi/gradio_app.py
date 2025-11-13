@@ -459,16 +459,11 @@ def create_gradio_interface() -> gr.Blocks:
 
 
 if __name__ == "__main__":
-    import warnings
     import logging
     import asyncio
     import sys
-    
-    # Suppress the Windows-specific asyncio connection errors
-    # These occur when connections are closed and are harmless
-    warnings.filterwarnings("ignore", category=ConnectionResetError)
-    
-    # Also reduce logging verbosity for asyncio
+
+    # Reduce logging verbosity for asyncio to suppress connection noise
     logging.getLogger("asyncio").setLevel(logging.WARNING)
     
     # Windows-specific: Use SelectorEventLoop to avoid ProactorEventLoop issues
