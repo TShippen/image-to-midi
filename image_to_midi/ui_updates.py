@@ -9,8 +9,11 @@ All functions use LRU caching to improve responsiveness when users adjust
 parameters, building upon the cached pipeline functions for maximum efficiency.
 """
 
+import logging
 from functools import lru_cache
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
 
 from image_to_midi.cache import (
     cached_binary_processing,
@@ -48,6 +51,7 @@ def get_or_create_file_manager(session_id: str) -> GradioFileManager:
     """
     if session_id not in _file_managers:
         _file_managers[session_id] = GradioFileManager(session_id=session_id)
+        logger.debug(f"Created file manager for session: {session_id}")
     return _file_managers[session_id]
 
 
@@ -77,6 +81,9 @@ def cleanup_session(session_id: str) -> None:
         file_manager = _file_managers[session_id]
         file_manager.cleanup_all()
         del _file_managers[session_id]
+        logger.info(f"Cleaned up session: {session_id}")
+    else:
+        logger.debug(f"Session {session_id} not found in registry (already cleaned up)")
 
 
 def cleanup_cache(session_id: str | None = None) -> str:
@@ -92,6 +99,7 @@ def cleanup_cache(session_id: str | None = None) -> str:
 
     # Clear computation caches (global, affects all sessions)
     clear_all_caches()
+    logger.info("Cleared all computation caches")
 
     # Clear file manager files
     if session_id is not None:
@@ -100,8 +108,10 @@ def cleanup_cache(session_id: str | None = None) -> str:
         return f"Cache and temporary files cleared for session {session_id}!"
     else:
         # Clean all sessions
+        session_count = len(_file_managers)
         for sid in list(_file_managers.keys()):
             cleanup_session(sid)
+        logger.info(f"Cleaned up {session_count} session(s)")
         return "Cache and temporary files cleared for all sessions!"
 
 

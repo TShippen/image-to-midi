@@ -448,7 +448,6 @@ def create_gradio_interface() -> gr.Blocks:
         try:
             from image_to_midi.ui_updates import cleanup_session
             cleanup_session(session_id)
-            logger.info(f"Cleaned up session: {session_id}")
         except Exception as e:
             # Log error but don't disrupt user experience
             logger.warning(f"Cleanup failed for session {session_id}: {e}")
