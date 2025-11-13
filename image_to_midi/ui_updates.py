@@ -9,8 +9,6 @@ All functions use LRU caching to improve responsiveness when users adjust
 parameters, building upon the cached pipeline functions for maximum efficiency.
 """
 
-import tempfile
-import os
 from functools import lru_cache
 from uuid import uuid4
 
@@ -35,39 +33,76 @@ from image_to_midi.file_manager import GradioFileManager
 # Global constant
 from image_to_midi.app_state import get_image_by_id
 
-# Create a global file manager instance
-# In production, this should be per-session, but for simplicity we use a global one
-_file_manager = GradioFileManager(session_id=str(uuid4()))
+# Per-session file manager registry
+_file_managers: dict[str, GradioFileManager] = {}
 
 
-def get_file_manager() -> GradioFileManager:
-    """Get the current file manager instance.
-    
+def get_or_create_file_manager(session_id: str) -> GradioFileManager:
+    """Get existing file manager for session or create a new one.
+
+    Args:
+        session_id: Unique session identifier string.
+
     Returns:
-        The global file manager instance.
+        GradioFileManager instance for this session.
     """
-    return _file_manager
+    if session_id not in _file_managers:
+        _file_managers[session_id] = GradioFileManager(session_id=session_id)
+    return _file_managers[session_id]
 
 
-def cleanup_cache() -> str:
-    """Manually trigger cache cleanup.
-    
+def get_file_manager(session_id: str | None = None) -> GradioFileManager:
+    """Get file manager for a specific session or create a temporary one.
+
+    Args:
+        session_id: Optional unique session identifier. If None, creates a
+                   temporary file manager (for backward compatibility).
+
+    Returns:
+        GradioFileManager instance for the specified session.
+    """
+    if session_id is None:
+        # Create temporary file manager for backward compatibility
+        return GradioFileManager(session_id=str(uuid4()))
+    return get_or_create_file_manager(session_id)
+
+
+def cleanup_session(session_id: str) -> None:
+    """Clean up files and remove file manager for a specific session.
+
+    Args:
+        session_id: Unique session identifier to clean up.
+    """
+    if session_id in _file_managers:
+        file_manager = _file_managers[session_id]
+        file_manager.cleanup_all()
+        del _file_managers[session_id]
+
+
+def cleanup_cache(session_id: str | None = None) -> str:
+    """Manually trigger cache cleanup for specific session or all sessions.
+
+    Args:
+        session_id: Optional session identifier. If None, cleans all sessions.
+
     Returns:
         Status message indicating cleanup completion.
     """
-    global _file_manager  # Declare global at the beginning
     from image_to_midi.cache import clear_all_caches
-    
-    # Clear computation caches
+
+    # Clear computation caches (global, affects all sessions)
     clear_all_caches()
-    
+
     # Clear file manager files
-    _file_manager.cleanup_all()
-    
-    # Recreate file manager for next operations
-    _file_manager = GradioFileManager(session_id=str(uuid4()))
-    
-    return "Cache and temporary files cleared successfully!"
+    if session_id is not None:
+        # Clean specific session
+        cleanup_session(session_id)
+        return f"Cache and temporary files cleared for session {session_id}!"
+    else:
+        # Clean all sessions
+        for sid in list(_file_managers.keys()):
+            cleanup_session(sid)
+        return "Cache and temporary files cleared for all sessions!"
 
 
 @lru_cache(maxsize=32)
